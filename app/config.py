@@ -24,8 +24,17 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "").lower()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+# Modelo barato para proponer platos e ingredientes (el de arriba solo se usa para leer el PDF)
+OPENAI_MODEL_FAST = os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini")
+AI_PHOTOS = os.getenv("AI_PHOTOS", "true").lower() in ("1", "true", "yes", "si", "sí")
+# Tope de gasto mensual en IA (dólares). Al llegar, la app sigue con el recetario y sin fotos nuevas.
+AI_MONTHLY_BUDGET = float(os.getenv("AI_MONTHLY_BUDGET", "1"))
+# Precio estimado por foto (calidad baja)
+AI_IMAGE_COST = float(os.getenv("AI_IMAGE_COST", "0.006"))
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+PHOTO_DIR = DATA_DIR / "photos"
 
 # Número de comensales para escalar la lista de la compra
 SERVINGS = int(os.getenv("SERVINGS", "4"))

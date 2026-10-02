@@ -59,6 +59,30 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 
+-- Gasto de IA por mes (para el límite mensual)
+CREATE TABLE IF NOT EXISTS ai_usage (
+    month TEXT PRIMARY KEY,           -- YYYY-MM
+    cost REAL DEFAULT 0,
+    calls INTEGER DEFAULT 0,
+    images INTEGER DEFAULT 0
+);
+
+-- Platos creados por la IA: se reutilizan gratis la próxima vez
+CREATE TABLE IF NOT EXISTS library (
+    key TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    created TEXT DEFAULT (datetime('now','localtime'))
+);
+
+-- Fotos de platos (una por nombre normalizado)
+CREATE TABLE IF NOT EXISTS photos (
+    key TEXT PRIMARY KEY,
+    name TEXT,
+    file TEXT,
+    status TEXT DEFAULT 'pending',    -- pending | ok | error
+    created TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at TEXT DEFAULT (datetime('now','localtime')),
@@ -89,6 +113,7 @@ def tx():
 
 def init():
     config.PDF_DIR.mkdir(parents=True, exist_ok=True)
+    config.PHOTO_DIR.mkdir(parents=True, exist_ok=True)
     with tx() as c:
         c.executescript(SCHEMA)
 

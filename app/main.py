@@ -4,10 +4,10 @@ import os
 import secrets
 from datetime import date, timedelta
 
-from flask import Flask, abort, jsonify, redirect, request, send_from_directory, session
+from flask import Flask, abort, jsonify, redirect, request, send_file, send_from_directory, session
 
-from . import ai, config, db, planner, service
-from .recipes import RECIPES
+from . import ai, config, db, photos, planner, service
+from .text import ALLERGENS, clean_title
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 app = Flask(__name__, static_folder=STATIC, static_url_path="/static")
@@ -139,6 +139,8 @@ def status():
         menus = [dict(r) for r in c.execute(
             "SELECT year, month, title, source_url, parser, fetched_at FROM menus ORDER BY year DESC, month DESC").fetchall()]
         logs = [dict(r) for r in c.execute("SELECT at, level, message FROM log ORDER BY id DESC LIMIT 15").fetchall()]
+    for m in menus:
+        m["title"] = clean_title(m["title"])
     return {
         "menus": menus,
         "ai": config.ai_provider() or None,
@@ -149,7 +151,26 @@ def status():
         "logs": logs,
         "servings": config.SERVINGS,
         "auth": bool(config.APP_PASSWORD),
+        "usage": ai.usage(),
+        "photos": {"enabled": config.AI_PHOTOS and bool(config.OPENAI_API_KEY), **photos.stats()},
     }
+
+
+@app.get("/api/photo")
+def photo():
+    name = request.args.get("name", "")
+    path, status = photos.lookup(name)
+    if path:
+        r = send_file(path, mimetype="image/webp", max_age=30 * 24 * 3600)
+        return r
+    if status == "pending":
+        return jsonify({"status": "pending"}), 202
+    return jsonify({"status": "none"}), 404
+
+
+@app.get("/api/allergens")
+def allergens():
+    return {"allergens": ALLERGENS}
 
 
 @app.post("/api/fetch")
@@ -183,26 +204,34 @@ def month_view():
     year = int(request.args.get("year", today.year))
     month = int(request.args.get("month", today.month))
     _, last = calendar.monthrange(year, month)
-    prefix = f"{year}-{month:02d}-"
-    with db.tx() as c:
-        rows = {r["date"]: r for r in c.execute("SELECT * FROM school_days WHERE date LIKE ?", (prefix + "%",))}
-        plans = {}
-        for r in c.execute("SELECT date, meal, choice FROM plan WHERE date LIKE ?", (prefix + "%",)):
-            ch = db.loads(r["choice"], None)
-            plans.setdefault(r["date"], {})[r["meal"]] = ch["name"] if ch else None
-        menu = c.execute("SELECT title, parser FROM menus WHERE year=? AND month=?", (year, month)).fetchone()
+    first = date(year, month, 1)
+    # Prepara las propuestas de todas las semanas del mes (recetario primero: casi siempre gratis)
+    monday = planner.monday_of(first)
+    while monday <= date(year, month, last):
+        planner.ensure_week(monday)
+        monday += timedelta(days=7)
     days = []
-    for d in range(1, last + 1):
-        key = f"{prefix}{d:02d}"
-        r = rows.get(key)
-        days.append({
-            "date": key,
-            "dishes": db.loads(r["dishes"], []) if r else [],
-            "dinner_hint": r["dinner_hint"] if r else "",
-            "note": r["note"] if r else "",
-            "plan": plans.get(key, {}),
-        })
-    return {"year": year, "month": month, "menu": dict(menu) if menu else None, "days": days}
+    with db.tx() as c:
+        menu = c.execute("SELECT title, parser FROM menus WHERE year=? AND month=?", (year, month)).fetchone()
+        for d in range(1, last + 1):
+            day = date(year, month, d)
+            sd = planner.school_day(c, day)
+            plan = {}
+            for meal in ("comida", "cena"):
+                p = planner.get_plan(c, day, meal)
+                if p is not None:
+                    plan[meal] = p["choice"]["name"] if p["choice"] else None
+            days.append({
+                "date": day.isoformat(),
+                "dishes": sd["dishes"] if sd else [],
+                "dinner_hint": sd["dinner_hint"] if sd else "",
+                "note": sd["note"] if sd else "",
+                "plan": plan,
+            })
+    menu = dict(menu) if menu else None
+    if menu:
+        menu["title"] = clean_title(menu["title"])
+    return {"year": year, "month": month, "menu": menu, "days": days}
 
 
 def week_payload(monday: date):
@@ -222,6 +251,7 @@ def week_payload(monday: date):
         "monday": monday.isoformat(),
         "days": out,
         "counts": counts,
+        "counts_weekdays": planner.week_counts(monday),
         "targets": planner.WEEK_TARGETS,
         "deficits": planner.weekend_deficits(monday),
     }
@@ -280,6 +310,14 @@ def choose(day, meal):
         else:
             cur["options"] = [dish if o["name"].lower() == dish["name"].lower() else o for o in cur["options"]]
     planner.save_plan(d, meal, options=cur["options"], choice=dish, edited=True)
+    return week_payload(planner.monday_of(d))
+
+
+@app.post("/api/plan/<day>/<meal>/ingredients")
+def fill_ingredients(day, meal):
+    check_meal(meal)
+    d = parse_day(day)
+    planner.ensure_ingredients(planner.monday_of(d), only=(d, meal))
     return week_payload(planner.monday_of(d))
 
 
@@ -367,14 +405,13 @@ def shopping_clear():
 
 @app.get("/api/recipes")
 def recipes():
-    return {"recipes": [{"name": r["name"], "groups": r["groups"], "when": r["when"]} for r in RECIPES]}
+    return {"recipes": [{"name": r["name"], "groups": r["groups"], "when": r.get("when", "cena")}
+                        for r in planner.all_recipes()]}
 
 
 @app.get("/api/recipe")
 def recipe():
-    from .recipes import find
-    r = find(request.args.get("name", ""))
-    return r or {}
+    return planner.find_any(request.args.get("name", "")) or {}
 
 
 service.start_scheduler() if os.getenv("DISABLE_SCHEDULER") != "1" else None

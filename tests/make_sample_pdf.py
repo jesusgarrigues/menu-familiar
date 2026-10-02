@@ -10,7 +10,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 
 MENUS = [
     ("Lentejas estofadas con verduras", "Tortilla de patata con ensalada", "Fruta de temporada", "Pescado y verdura"),
-    ("Crema de calabacín", "Pollo asado con patatas", "Yogur", "Huevo y ensalada"),
+    ("CREMA DE CALABACÍN", "POLLO ASADO CON PATATAS (7)", "YOGUR (7)", "Huevo y ensalada"),
     ("Macarrones con tomate", "Merluza a la romana con lechuga", "Fruta", "Carne blanca y verdura"),
     ("Arroz a la cubana", "Filete de pavo con zanahoria", "Fruta", "Pescado y puré de verduras"),
     ("Garbanzos con espinacas", "Bacalao al horno con tomate", "Natillas", "Tortilla francesa con calabacín"),

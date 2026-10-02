@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from . import ai, db
 from .recipes import RECIPES, find
 from .scraper import norm
+from .text import clean_dish, sentence_case
 
 KEYWORDS = {
     "pescado": ["pescado", "merluza", "bacalao", "salmon", "atun", "pescadilla", "gallo", "lenguado", "rape",
@@ -70,12 +71,53 @@ def _rng(*keys) -> random.Random:
     return random.Random(seed)
 
 
-def _dish(recipe: dict, source="recetario") -> dict:
-    return {"name": recipe["name"], "groups": recipe["groups"], "ingredients": recipe["ingredients"], "source": source}
+def _dish(recipe: dict, source=None) -> dict:
+    return {"name": recipe["name"], "groups": recipe["groups"], "ingredients": recipe.get("ingredients") or [],
+            "source": source or recipe.get("source") or "recetario"}
+
+
+# ---------------------------------------------------------------------------
+# Biblioteca: recetario incluido + platos que ha creado la IA (se reutilizan gratis)
+# ---------------------------------------------------------------------------
+
+def library() -> list[dict]:
+    with db.tx() as c:
+        rows = c.execute("SELECT data FROM library").fetchall()
+    return [db.loads(r["data"], {}) for r in rows]
+
+
+def all_recipes() -> list[dict]:
+    names = {r["name"].lower() for r in RECIPES}
+    return RECIPES + [r for r in library() if r.get("name") and r["name"].lower() not in names]
+
+
+def find_any(name: str):
+    r = find(name)
+    if r:
+        return r
+    key = (name or "").strip().lower()
+    with db.tx() as c:
+        row = c.execute("SELECT data FROM library WHERE key=?", (key,)).fetchone()
+    return db.loads(row["data"], None) if row else None
+
+
+def save_to_library(dish: dict, when: str = "cena"):
+    name = (dish.get("name") or "").strip()
+    if not name or find(name):
+        return
+    key = name.lower()
+    with db.tx() as c:
+        row = c.execute("SELECT data FROM library WHERE key=?", (key,)).fetchone()
+        cur = db.loads(row["data"], {}) if row else {}
+        data = {"name": name, "groups": dish.get("groups") or cur.get("groups") or sorted(classify(name)),
+                "when": cur.get("when") or when, "source": "ia",
+                "ingredients": dish.get("ingredients") or cur.get("ingredients") or []}
+        c.execute("INSERT INTO library(key, data) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
+                  (key, db.dumps(data)))
 
 
 def make_dish(name: str, ingredients=None, source="manual") -> dict:
-    r = find(name)
+    r = find_any(name)
     if r and ingredients is None:
         return _dish(r, source)
     return {"name": name.strip(), "groups": sorted(classify(name)), "ingredients": ingredients or [], "source": source}
@@ -88,13 +130,20 @@ def _recent_names(day: date, days_back=7) -> set[str]:
     return {(db.loads(r["choice"], None) or {}).get("name", "").lower() for r in rows}
 
 
-def rule_dinners(lunch: list[str], hint: str, day: date, n=4, avoid=None, salt="") -> list[dict]:
+def _strong(r: dict, hint_groups: set[str]) -> bool:
+    g = set(r["groups"])
+    need = hint_groups - {"verdura", "lacteo"} or hint_groups
+    return need <= g
+
+
+def rule_dinners(lunch: list[str], hint: str, day: date, n=4, avoid=None, salt="", with_strong=False):
     lunch_groups = classify(" ".join(lunch))
     hint_groups = classify(hint) - {"fruta"}
     recent = _recent_names(day) | {a.lower() for a in (avoid or [])}
     rng = _rng(day.isoformat(), salt)
     scored = []
-    for r in RECIPES:
+    strong = 0
+    for r in all_recipes():
         if r["when"] not in ("cena", "ambas"):
             continue
         g = set(r["groups"])
@@ -116,23 +165,46 @@ def rule_dinners(lunch: list[str], hint: str, day: date, n=4, avoid=None, salt="
                 s += 1.5
         if r["name"].lower() in recent:
             s -= 4
+        elif hint_groups and _strong(r, hint_groups):
+            strong += 1
         scored.append((s, r))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [_dish(r) for _, r in scored[:n]]
+    out = [_dish(r) for _, r in scored[:n]]
+    return (out, strong) if with_strong else out
+
+
+def needs_ai(hint: str, strong: int) -> bool:
+    """La IA solo hace falta si el cole pide algo para lo que el recetario no tiene al menos 3 platos que encajen."""
+    return bool(hint) and strong < 3 and ai.available()
+
+
+def _ai_dishes(items: list[dict], avoid=None) -> dict[str, list[dict]]:
+    """Pide a la IA cenas para varios días en una sola llamada y las guarda en la biblioteca."""
+    try:
+        res = ai.suggest_week(items, n=3, avoid=avoid)
+    except Exception as e:  # sin conexión, límite alcanzado...
+        db.log("warn", f"IA no disponible para cenas ({e}); uso el recetario")
+        return {}
+    for dishes in res.values():
+        for d in dishes:
+            save_to_library(d, "cena")
+    return {k: [dict(make_dish(d["name"], source="ia"), groups=d["groups"] or sorted(classify(d["name"])), source="ia")
+                for d in v] for k, v in res.items()}
 
 
 def recommend_dinners(day: date, lunch: list[str], hint: str, avoid=None, salt="") -> list[dict]:
     options: list[dict] = []
     if hint and hint_is_dish(hint):
-        options.append(make_dish(hint, source="cole"))
+        options.append(make_dish(sentence_case(hint), source="cole"))
     n = 4 - len(options)
-    if ai.available():
-        try:
-            options += [dict(d, source="ia") for d in ai.suggest_dinners(lunch, hint, n=n, avoid=avoid)]
-            return options
-        except Exception as e:  # sin conexión, cuota agotada...
-            db.log("warn", f"IA no disponible para cenas ({e}); uso el recetario")
-    return options + rule_dinners(lunch, hint, day, n=n, avoid=avoid, salt=salt)
+    local, strong = rule_dinners(lunch, hint, day, n=n, avoid=avoid, salt=salt, with_strong=True)
+    if needs_ai(hint, strong):
+        extra = _ai_dishes([{"date": day.isoformat(), "lunch": lunch, "hint": hint}], avoid=avoid).get(day.isoformat(), [])
+        if extra:
+            names = {o["name"].lower() for o in options}
+            merged = [d for d in extra if d["name"].lower() not in names]
+            return (options + merged + local)[:4]
+    return options + local
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +223,11 @@ def school_day(c, d: date):
     row = c.execute("SELECT * FROM school_days WHERE date=?", (d.isoformat(),)).fetchone()
     if not row:
         return None
-    return {"date": row["date"], "dishes": db.loads(row["dishes"], []), "dinner_hint": row["dinner_hint"] or "",
-            "note": row["note"] or "", "edited": bool(row["edited"])}
+    cleaned = [clean_dish(x) for x in db.loads(row["dishes"], [])]
+    cleaned = [(n, a) for n, a in cleaned if n]
+    hint, _ = clean_dish(row["dinner_hint"] or "")
+    return {"date": row["date"], "dishes": [n for n, _ in cleaned], "allergens": [a for _, a in cleaned],
+            "dinner_hint": hint, "note": sentence_case(row["note"] or ""), "edited": bool(row["edited"])}
 
 
 def get_plan(c, d: date, meal: str):
@@ -187,6 +262,8 @@ def ensure_week(monday: date, force=False):
     with db.tx() as c:
         school = {d: school_day(c, d) for d in week_dates(monday)}
         has_menu = any(sd and sd["dishes"] for sd in school.values())
+    pending: dict[date, list[dict]] = {}
+    ai_items = []
     for d in week_dates(monday)[:5]:
         sd = school[d]
         if not has_menu and sd is None:
@@ -195,8 +272,24 @@ def ensure_week(monday: date, force=False):
             cur = get_plan(c, d, "cena")
         if force or not cur or (not cur["edited"] and not cur["options"]):
             lunch = sd["dishes"] if sd else []
-            opts = recommend_dinners(d, lunch, sd["dinner_hint"] if sd else "")
-            save_plan(d, "cena", options=opts, choice=opts[0] if opts else None, edited=False)
+            hint = sd["dinner_hint"] if sd else ""
+            opts = [make_dish(sentence_case(hint), source="cole")] if hint and hint_is_dish(hint) else []
+            local, strong = rule_dinners(lunch, hint, d, n=4 - len(opts), with_strong=True)
+            pending[d] = opts + local
+            if needs_ai(hint, strong):
+                ai_items.append({"date": d.isoformat(), "lunch": lunch, "hint": hint, "n_fixed": len(opts)})
+    if ai_items:  # todas las cenas que necesitan IA, en una sola llamada
+        res = _ai_dishes([{k: v for k, v in it.items() if k != "n_fixed"} for it in ai_items])
+        for it in ai_items:
+            d = date.fromisoformat(it["date"])
+            extra = res.get(it["date"], [])
+            if extra:
+                fixed = pending[d][:it["n_fixed"]]
+                pending[d] = (fixed + extra + pending[d][it["n_fixed"]:])[:4]
+    for d, opts in pending.items():
+        save_plan(d, "cena", options=opts, choice=opts[0] if opts else None, edited=False)
+    for d in week_dates(monday)[:5]:
+        sd = school[d]
         if _home_lunch(sd):
             with db.tx() as c:
                 cur = get_plan(c, d, "comida")
@@ -231,7 +324,7 @@ def _pick_weekend(monday: date, slots: list[str], salt="") -> list[dict]:
     chosen = []
     for slot in slots:
         best, best_s = None, -1e9
-        for r in RECIPES:
+        for r in all_recipes():
             if r["when"] not in (slot, "ambas") or r["name"].lower() in used:
                 continue
             s = sum(max(deficit.get(g, 0), -1) for g in r["groups"]) + rng.random() * 1.5
@@ -273,19 +366,9 @@ def ensure_weekend(monday: date, force=False):
     todo = [s for s in slots if force or not current[s] or (not current[s]["edited"] and not current[s]["choice"])]
     if not todo:
         return
-    proposal: dict = {}
-    if ai.available():
-        try:
-            data = ai.weekend_menu(week_summary(monday), weekend_deficits(monday), avoid=[])
-            proposal = {(sat, "comida"): data["sabado"]["comida"], (sat, "cena"): data["sabado"]["cena"],
-                        (sun, "comida"): data["domingo"]["comida"], (sun, "cena"): data["domingo"]["cena"]}
-            proposal = {k: dict(v, source="ia") for k, v in proposal.items()}
-        except Exception as e:
-            db.log("warn", f"IA no disponible para el fin de semana ({e}); uso el recetario")
-            proposal = {}
-    if not proposal:
-        picks = _pick_weekend(monday, [m for _, m in slots], salt="v2" if force else "")
-        proposal = {s: _dish(r) for s, r in zip(slots, picks)}
+    # El finde sale del recetario (incluidos los platos que ya creó la IA): gratis y equilibrado
+    picks = _pick_weekend(monday, [m for _, m in slots], salt=("v2" + str(force)) if force else "")
+    proposal = {s: _dish(r) for s, r in zip(slots, picks)}
     for s in todo:
         if s in proposal:
             alt = [_dish(r) for r in _pick_weekend(monday, [s[1]] * 3, salt=s[0].isoformat() + s[1])]
@@ -300,7 +383,46 @@ def ensure_weekend(monday: date, force=False):
 SECTION_ORDER = ["Frutería", "Carnicería", "Pescadería", "Huevos y lácteos", "Panadería", "Despensa", "Congelados", "Otros"]
 
 
+def ensure_ingredients(monday: date, only: tuple[date, str] | None = None):
+    """Completa los ingredientes de los platos elegidos que no los tengan (recetario/biblioteca primero, IA en lote)."""
+    missing: dict[str, list[tuple[date, str]]] = {}
+    with db.tx() as c:
+        for d in week_dates(monday):
+            for meal in ("comida", "cena"):
+                if only and (d, meal) != only:
+                    continue
+                p = get_plan(c, d, meal)
+                if p and p["choice"] and not p["choice"].get("ingredients"):
+                    missing.setdefault(p["choice"]["name"], []).append((d, meal))
+    if not missing:
+        return
+    found: dict[str, list[dict]] = {}
+    for name in list(missing):
+        r = find_any(name)
+        if r and r.get("ingredients"):
+            found[name] = r["ingredients"]
+    rest = [n for n in missing if n not in found]
+    if rest and ai.available():
+        try:
+            res = ai.ingredients(rest)
+            for n in rest:
+                ings = res.get(n.lower()) or next((v for k, v in res.items() if k in n.lower() or n.lower() in k), None)
+                if ings:
+                    found[n] = ings
+                    save_to_library({"name": n, "ingredients": ings, "groups": sorted(classify(n))})
+        except Exception as e:
+            db.log("warn", f"IA no disponible para ingredientes ({e})")
+    for name, ings in found.items():
+        for d, meal in missing[name]:
+            with db.tx() as c:
+                p = get_plan(c, d, meal)
+            choice = dict(p["choice"], ingredients=ings)
+            opts = [dict(o, ingredients=ings) if o["name"] == name else o for o in p["options"]]
+            save_plan(d, meal, options=opts, choice=choice)
+
+
 def shopping_list(monday: date) -> dict:
+    ensure_ingredients(monday)
     items: dict[str, dict] = {}
     with db.tx() as c:
         for d in week_dates(monday):

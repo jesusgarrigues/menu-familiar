@@ -17,7 +17,7 @@
   <meta name="apple-mobile-web-app-title" content="Menú">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
-  <link rel="stylesheet" href="/static/styles.css?v=3">
+  <link rel="stylesheet" href="/static/styles.css?v=4">
 </head>
 <body>
   <main id="view" aria-live="polite"></main>
@@ -53,8 +53,13 @@
     </form>
   </dialog>
 
+  <dialog id="daysheet" aria-label="Detalle del día">
+    <div class="grabber" aria-hidden="true"></div>
+    <div id="daysheet-body"></div>
+  </dialog>
+
   <div id="toast" role="status"></div>
   <datalist id="recipe-list"></datalist>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

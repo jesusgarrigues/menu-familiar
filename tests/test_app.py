@@ -46,6 +46,18 @@ class PlannerTest(unittest.TestCase):
         self.assertFalse(planner.hint_is_dish("Carne blanca y puré de verduras"))
         self.assertTrue(planner.hint_is_dish("Tortilla francesa con calabacín"))
 
+    def test_clean_dish(self):
+        from app.text import clean_dish, clean_title
+        self.assertEqual(clean_dish("PAELLA MIXTA (2,14)"), ("Paella mixta", [2, 14]))
+        self.assertEqual(clean_dish("JAMÓN YORK Y QUESO (7) CON ENSALADA"), ("Jamón york y queso con ensalada", [7]))
+        self.assertEqual(clean_dish("Crema de calabaza"), ("Crema de calabaza", []))
+        self.assertEqual(clean_title("Drive, VILLA OCTUBRE 2026 - BASAL.pdf"), "VILLA OCTUBRE 2026 - BASAL")
+
+    def test_photo_keys(self):
+        from app.photos import key_for
+        self.assertEqual(key_for("Cocido completo"), key_for("COCIDO MADRILEÑO (1,3)"))
+        self.assertEqual(key_for("Pasta integral boloñesa"), key_for("Macarrones a la boloñesa"))
+
     def test_sum_qty(self):
         self.assertEqual(planner.sum_qty(["500 g", "1 kg", "2 latas", "1 lata"]), "1,5 kg + 3 latas")
 
@@ -77,6 +89,21 @@ class ApiTest(unittest.TestCase):
         day = [d for d in r.json["days"] if d["date"] == "2026-10-07"][0]
         self.assertEqual(day["school"]["dishes"], ["Paella"])
         self.assertTrue(any("huevo" in o["groups"] for o in day["cena"]["options"]))
+
+    def test_clean_names_in_week(self):
+        w = self.c.get("/api/week?date=2026-10-02").json
+        fri = [d for d in w["days"] if d["date"] == "2026-10-02"][0]
+        self.assertEqual(fri["school"]["dishes"][1], "Pollo asado con patatas")
+        self.assertEqual(fri["school"]["allergens"][1], [7])
+
+    def test_month_has_dinners(self):
+        m = self.c.get("/api/month?year=2026&month=10").json
+        day = [d for d in m["days"] if d["date"] == "2026-10-20"][0]
+        self.assertTrue(day["dishes"])
+        self.assertTrue(day["plan"].get("cena"))
+
+    def test_photo_without_key(self):
+        self.assertEqual(self.c.get("/api/photo?name=Paella").status_code, 404)
 
     def test_pwa_files(self):
         m = self.c.get("/manifest.webmanifest")

@@ -9,16 +9,30 @@ App web (en Docker) para organizar las comidas y cenas de la familia a partir de
 - **Todo se puede cambiar.** Puedes elegir otra opción, pedir más ideas, escribir tu propio plato con sus ingredientes o marcar que coméis fuera.
 - **Lista de la compra.** Se genera para la semana a partir de las comidas y cenas que se hacen en casa, agrupada por secciones (frutería, pescadería…). Suma las cantidades, deja marcar lo comprado y añadir otras cosas, y se puede compartir por WhatsApp.
 
-## Cómo lee el PDF (¿hace falta IA?)
+## IA: qué hace y cuánto cuesta
 
-No es imprescindible:
+La IA es opcional. Sin ella, la app lee el PDF con un lector automático y saca las ideas de un recetario incluido (`app/recipes.py`).
 
-| Modo | Cómo funciona | Cuándo usarlo |
-|---|---|---|
-| **Sin IA** (por defecto) | Un lector de PDF (`pdfplumber`) reconoce menús en forma de calendario o de lista. Las ideas de cenas salen de un recetario incluido (`app/recipes.py`, unos 45 platos con ingredientes). | Gratis y sin depender de nadie. Si algún día sale mal, se corrige con el botón *Corregir*. |
-| **Con IA** (recomendado) | Si añades una clave de **OpenAI** o **Anthropic**, la IA lee el PDF directamente (también tablas raras o PDF escaneados) y propone platos más variados. | Más fiable. El coste es de unos céntimos al mes. |
+Con una clave de **OpenAI** (o de Anthropic, que no hace fotos):
 
-Si la IA falla (sin saldo, sin conexión…), la app usa automáticamente el lector y el recetario locales.
+- **Lee el PDF del cole** una vez al mes, incluso si tiene tablas raras.
+- **Propone cenas** cuando el recetario no tiene al menos 3 platos que cumplan lo que recomienda el cole.
+- **Crea una foto de cada plato** una sola vez y la guarda para siempre.
+
+Para gastar lo mínimo sin que se note:
+
+| Técnica | Efecto |
+|---|---|
+| Primero el recetario; la IA solo cuando hace falta | La mayoría de semanas no hay ninguna llamada |
+| Lo que crea la IA se guarda en una biblioteca | Los platos y sus ingredientes se reutilizan gratis |
+| Una sola llamada por semana para todas las cenas que faltan | Hasta 5 veces menos llamadas |
+| Modelo muy barato (`gpt-5-nano`) para platos; el normal solo para el PDF | Unas 10 veces más barato por llamada |
+| Ingredientes solo del plato elegido y en lote | Respuestas más cortas |
+| Instrucciones fijas siempre iguales y al principio | Descuento automático del proveedor por caché |
+| Fotos en calidad baja, de tamaño móvil, una por plato, y los nombres casi iguales comparten foto | Unos 0,005 $ por foto, solo la primera vez |
+| Tope mensual (`AI_MONTHLY_BUDGET`, por defecto 1 $) | Al llegar al tope, la app sigue con el recetario y sin fotos nuevas |
+
+En **Ajustes** se ve lo gastado en el mes. El primer mes cuesta algo más, porque es cuando se crean las fotos; los siguientes, unos céntimos.
 
 ## Instalación
 
@@ -73,12 +87,16 @@ Si pones contraseña (`APP_PASSWORD`), la app muestra una pantalla de acceso y r
 | Variable | Por defecto | Para qué sirve |
 |---|---|---|
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | — | Activa la IA (basta con una de las dos). |
-| `OPENAI_MODEL` / `ANTHROPIC_MODEL` | `gpt-4.1-mini` / `claude-haiku-4-5` | Modelo que se usa. |
+| `OPENAI_MODEL` / `ANTHROPIC_MODEL` | `gpt-4.1-mini` / `claude-haiku-4-5` | Modelo para leer el PDF (y el de Anthropic para todo). |
 | `APP_PASSWORD` | — | Pide una contraseña para entrar. Recomendable si la app se puede abrir desde internet. |
 | `SCHOOL_MENU_URL` | web del comedor | Página donde se publica el PDF. |
 | `SCHOOL_MENU_KEYWORD` | `BASAL` | Si hay varios PDF (basal, alergias…), elige el que tenga esta palabra. |
 | `CHECK_EVERY_HOURS` | `6` | Cada cuántas horas se revisa la web. |
 | `CHECK_UNTIL_DAY` | `7` | Hasta qué día del mes se buscan versiones nuevas del PDF ya importado. |
+| `OPENAI_MODEL_FAST` | `gpt-5-nano` | Modelo barato para proponer platos e ingredientes. |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-1-mini` | Modelo para las fotos de los platos. |
+| `AI_PHOTOS` | `true` | Crear fotos de los platos (necesita clave de OpenAI). |
+| `AI_MONTHLY_BUDGET` | `1` | Tope de gasto en IA al mes, en dólares. |
 | `SERVINGS` | `4` | Comensales (para las cantidades que propone la IA). |
 
 ## Si la descarga automática falla
