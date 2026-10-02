@@ -125,14 +125,59 @@ def init():
                 pass
 
 
+LEVELS = {"debug": 10, "info": 20, "warn": 30, "error": 40}
+_level_cache = {"value": None, "at": 0.0}
+
+
+def log_level() -> str:
+    """Nivel mínimo que se guarda en el registro (se cambia desde Ajustes o con LOG_LEVEL)."""
+    import time
+    now = time.time()
+    if _level_cache["value"] is None or now - _level_cache["at"] > 10:
+        try:
+            with tx() as c:
+                row = c.execute("SELECT value FROM settings WHERE key='log_level'").fetchone()
+            _level_cache["value"] = (row["value"] if row else None) or config.LOG_LEVEL
+        except Exception:
+            _level_cache["value"] = config.LOG_LEVEL
+        _level_cache["at"] = now
+    return _level_cache["value"] if _level_cache["value"] in LEVELS else "info"
+
+
+def set_log_level(level: str):
+    if level not in LEVELS:
+        raise ValueError("Nivel no válido")
+    set_setting("log_level", level)
+    _level_cache["value"] = level
+
+
 def log(level: str, message: str):
+    level = level if level in LEVELS else "info"
+    if LEVELS[level] < LEVELS[log_level()]:
+        return
     try:
         with tx() as c:
             c.execute("INSERT INTO log(level, message) VALUES (?,?)", (level, message[:2000]))
-            c.execute("DELETE FROM log WHERE id NOT IN (SELECT id FROM log ORDER BY id DESC LIMIT 200)")
+            c.execute("DELETE FROM log WHERE id NOT IN (SELECT id FROM log ORDER BY id DESC LIMIT 1000)")
     except Exception:
         pass
     print(f"[{level}] {message}", flush=True)
+
+
+def debug(message: str):
+    log("debug", message)
+
+
+def info(message: str):
+    log("info", message)
+
+
+def warn(message: str):
+    log("warn", message)
+
+
+def error(message: str):
+    log("error", message)
 
 
 def loads(value, default):

@@ -27,11 +27,12 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 # Modelo barato para proponer platos e ingredientes (el de arriba solo se usa para leer el PDF)
 OPENAI_MODEL_FAST = os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano")
 OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini")
-# Crear fotos con IA cuando no se encuentra ninguna en internet. Desactivado: la IA se usa para buscarlas.
-AI_PHOTOS = os.getenv("AI_PHOTOS", "false").lower() in ("1", "true", "yes", "si", "sí")
-# Fotos: primero se buscan en internet (gratis); la IA solo si no aparece ninguna adecuada
+# Crear con IA las fotos que no se encuentren en internet (último recurso)
+AI_PHOTOS = os.getenv("AI_PHOTOS", "true").lower() in ("1", "true", "yes", "si", "sí")
+# Fotos: primero se buscan en internet; la IA confirma las dudosas
 PHOTOS_WEB = os.getenv("PHOTOS_WEB", "true").lower() in ("1", "true", "yes", "si", "sí")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")  # opcional y gratis: mejores fotos
+PHOTO_WORKERS = int(os.getenv("PHOTO_WORKERS", "3"))  # fotos que se buscan a la vez
 # Tope de gasto mensual en IA (dólares). Al llegar, la app sigue con el recetario y sin fotos nuevas.
 AI_MONTHLY_BUDGET = float(os.getenv("AI_MONTHLY_BUDGET", "1"))
 # Precio estimado por foto (calidad baja)
@@ -47,6 +48,9 @@ SERVINGS = int(os.getenv("SERVINGS", "4"))
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 
 TZ = os.getenv("TZ", "Europe/Madrid")
+
+# Nivel del registro: debug, info, warn o error (también se cambia desde Ajustes)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "info").lower()
 
 
 def ai_provider() -> str:

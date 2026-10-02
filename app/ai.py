@@ -64,7 +64,7 @@ def available() -> bool:
 
 
 def photos_available() -> bool:
-    """Crear fotos con IA (desactivado por defecto: la IA se usa para BUSCARLAS, no para crearlas)."""
+    """Crear con IA las fotos que no aparecen en internet (último recurso; solo OpenAI)."""
     return config.AI_PHOTOS and bool(config.OPENAI_API_KEY) and within_budget(config.AI_IMAGE_COST)
 
 
@@ -117,7 +117,10 @@ def complete_json(system: str, prompt: str, pdf_bytes: bytes | None = None, max_
             raise AIError(f"OpenAI {r.status_code}: {r.text[:300]}")
         data = r.json()
         u = data.get("usage") or {}
-        _add_usage(_cost(model, u.get("prompt_tokens", 0), u.get("completion_tokens", 0)))
+        cost = _cost(model, u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
+        _add_usage(cost)
+        db.debug(f"IA {model}: {prompt.splitlines()[0][:60]} · {u.get('prompt_tokens', 0)}+{u.get('completion_tokens', 0)} "
+                 f"tokens · {cost:.5f} $")
         return _parse_json(data["choices"][0]["message"]["content"])
 
     model = config.ANTHROPIC_MODEL
@@ -141,8 +144,10 @@ def complete_json(system: str, prompt: str, pdf_bytes: bytes | None = None, max_
         raise AIError(f"Anthropic {r.status_code}: {r.text[:300]}")
     data = r.json()
     u = data.get("usage") or {}
-    _add_usage(_cost(model, u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) // 10,
-                     u.get("output_tokens", 0)))
+    cost = _cost(model, u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) // 10, u.get("output_tokens", 0))
+    _add_usage(cost)
+    db.debug(f"IA {model}: {prompt.splitlines()[0][:60]} · {u.get('input_tokens', 0)}+{u.get('output_tokens', 0)} "
+             f"tokens · {cost:.5f} $")
     return _parse_json("".join(b.get("text", "") for b in data.get("content", [])))
 
 
@@ -276,4 +281,5 @@ def generate_photo(name: str) -> bytes:
     if not r.ok:
         raise AIError(f"OpenAI imágenes {r.status_code}: {r.text[:300]}")
     _add_usage(config.AI_IMAGE_COST, calls=1, images=1)
+    db.debug(f"IA {config.OPENAI_IMAGE_MODEL}: foto creada de «{name}» · {config.AI_IMAGE_COST:.3f} $")
     return base64.b64decode(r.json()["data"][0]["b64_json"])

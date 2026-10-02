@@ -1,11 +1,11 @@
 /* Service worker: la app abre al instante y se puede consultar sin conexión. */
-const VERSION = "v6";
+const VERSION = "v7";
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 const ASSETS = [
   "/",
-  "/static/styles.css?v=6",
-  "/static/app.js?v=6",
+  "/static/styles.css?v=7",
+  "/static/app.js?v=7",
   "/manifest.webmanifest",
   "/static/icons/icon-192.png",
   "/static/icons/icon-512.png",
@@ -36,7 +36,7 @@ self.addEventListener("fetch", event => {
     event.respondWith(
       fetch(req).then(res => {
         // Respuesta de redirección (sesión de Cloudflare Access caducada): se pasa tal cual para que la página recargue
-        if (res.ok && res.type === "basic") { const copy = res.clone(); caches.open(DATA).then(c => c.put(req, copy)); }
+        if (res.status === 200 && res.type === "basic") { const copy = res.clone(); caches.open(DATA).then(c => c.put(req, copy)); }
         return res;
       }).catch(() => caches.match(req).then(r => r || new Response(JSON.stringify({ error: "Sin conexión" }), {
         status: 503, headers: { "Content-Type": "application/json" } })))

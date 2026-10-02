@@ -114,6 +114,51 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(len(pick.call_args[0][1]), 2)
         self.assertEqual(credit["url"], "https://x/b.jpg")
 
+    def test_clear_match_skips_ai(self):
+        from unittest import mock
+        from app import photo_sources
+        cands = [{"url": "https://x/l.jpg", "title": "Lentejas estofadas, plato de cocina española", "source": "wikimedia"}]
+        with mock.patch("app.ai.available", return_value=True), \
+             mock.patch("app.ai.photo_queries") as q, mock.patch("app.ai.pick_photo") as pick, \
+             mock.patch.object(photo_sources, "PROVIDERS", [lambda q: cands]), \
+             mock.patch("app.photo_sources._download", return_value=(b"img", {"url": "https://x/l.jpg"})):
+            data, credit = photo_sources.find_photo("Lentejas estofadas")
+        q.assert_not_called()
+        pick.assert_not_called()
+        self.assertEqual(credit["url"], "https://x/l.jpg")
+
+    def test_generates_when_ai_rejects_all(self):
+        import io as _io
+        from unittest import mock
+        from PIL import Image
+        from app import config, photo_sources, photos
+        buf = _io.BytesIO(); Image.new("RGB", (300, 300), (10, 120, 40)).save(buf, "JPEG")
+        cands = [{"url": "https://x/k.jpg", "thumb": "https://x/k-t.jpg", "title": "Kiwi", "source": "openverse"}]
+        with mock.patch.object(config, "PHOTOS_WEB", True), \
+             mock.patch("app.ai.available", return_value=True), \
+             mock.patch("app.ai.photos_available", return_value=True), \
+             mock.patch("app.ai.photo_queries", return_value=["kiwi fruit"]), \
+             mock.patch("app.ai.pick_photo", return_value=None), \
+             mock.patch("app.ai.generate_photo", return_value=buf.getvalue()) as gen, \
+             mock.patch.object(photo_sources, "PROVIDERS", [lambda q: cands]), \
+             mock.patch("app.photo_sources._thumb_jpeg", return_value=buf.getvalue()):
+            photos._worker_once(photos.key_for("Kiwi"), "Kiwi")
+        gen.assert_called_once()
+        self.assertEqual(photos.lookup("Kiwi")[1], "ok")
+
+    def test_worker_survives_errors(self):
+        from unittest import mock
+        from app import photos
+        with mock.patch("app.photos._worker_once", side_effect=RuntimeError("boom")), \
+             mock.patch("app.photos.enabled", return_value=True):
+            photos.lookup("Plato que falla")
+            import time as _t
+            for _ in range(50):
+                if not photos._active and "plato falla que" not in photos._wanted:
+                    break
+                _t.sleep(0.05)
+        self.assertTrue(any(t.is_alive() for t in photos._threads))
+
     def test_sum_qty(self):
         self.assertEqual(planner.sum_qty(["500 g", "1 kg", "2 latas", "1 lata"]), "1,5 kg + 3 latas")
 
@@ -187,6 +232,24 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(c.get("/api/status").status_code, 200)
         finally:
             config.APP_PASSWORD = ""
+
+    def test_log_levels(self):
+        from app import db
+        self.c.post("/api/logs/level", json={"level": "info"})
+        db.debug("detalle-oculto")
+        db.info("mensaje-info")
+        db.error("mensaje-error")
+        msgs = [l["message"] for l in self.c.get("/api/logs?level=debug").json["logs"]]
+        self.assertNotIn("detalle-oculto", msgs)
+        self.assertIn("mensaje-info", msgs)
+        self.c.post("/api/logs/level", json={"level": "debug"})
+        db.debug("detalle-visible")
+        errs = [l["message"] for l in self.c.get("/api/logs?level=error").json["logs"]]
+        self.assertEqual(errs[0], "mensaje-error")
+        self.assertNotIn("mensaje-info", errs)
+        self.assertIn("detalle-visible", [l["message"] for l in self.c.get("/api/logs").json["logs"]])
+        self.assertEqual(self.c.post("/api/logs/level", json={"level": "x"}).status_code, 400)
+        self.assertEqual(self.c.get("/api/photo?name=Paella&check=1").json["status"], "none")
 
     def test_holiday_has_home_lunch(self):
         w = self.c.get("/api/week?date=2026-10-12").json

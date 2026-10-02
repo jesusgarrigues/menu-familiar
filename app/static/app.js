@@ -90,15 +90,40 @@ document.addEventListener("click", async e => {
     const ph = b.closest(".ph");
     ph.classList.remove("loaded");
     const img = ph.querySelector("img");
-    if (img) { img.dataset.tries = 0; setTimeout(() => { img.src = img.src.replace(/&t=\d+$/, "") + `&t=${Date.now()}`; }, 5000); }
+    if (img) { img.dataset.started = Date.now(); img.removeAttribute("src"); photoRetry(img, b.dataset.reject); }
   } catch (err) { toast(err.message); } finally { b.disabled = false; }
 }, true);
 
-window.photoRetry = img => {
-  const n = Number(img.dataset.tries || 0);
-  if (n >= 8) { img.remove(); return; }
-  img.dataset.tries = n + 1;
-  setTimeout(() => { if (img.isConnected) img.src = img.src.replace(/&t=\d+$/, "") + `&t=${Date.now()}`; }, 4000 + n * 4000);
+/* La foto aún no está: se pregunta al servidor hasta que esté lista (y así se busca antes la que está en pantalla) */
+window.photoRetry = (img, name) => {
+  if (img._polling) return;
+  name = name || new URL(img.getAttribute("src") || "", location.href).searchParams.get("name");
+  if (!name) return;
+  img._polling = true;
+  if (!img.dataset.started) img.dataset.started = Date.now();
+  let n = 0;
+  const tick = async () => {
+    if (!img.isConnected) return;
+    if (Date.now() - Number(img.dataset.started) > 20 * 60000) { img.remove(); return; }
+    let st = "pending";
+    try {
+      const r = await fetch(`/api/photo?check=1&name=${encodeURIComponent(name)}`, { credentials: "same-origin", cache: "no-store" });
+      if (r.ok) st = (await r.json()).status;
+    } catch (_) { }
+    if (!img.isConnected) return;
+    if (st === "ok") {
+      img._polling = false;
+      const fails = Number(img.dataset.okfail || 0);
+      if (fails > 2) { img.remove(); return; }
+      img.dataset.okfail = fails + 1;
+      img.src = `/api/photo?name=${encodeURIComponent(name)}&t=${Date.now()}`;
+      return;
+    }
+    if (st === "none") { img.remove(); return; }
+    n++;
+    setTimeout(tick, Math.min(2500 + n * 1500, 15000));
+  };
+  setTimeout(tick, 2500);
 };
 
 function toast(msg) {
@@ -613,7 +638,10 @@ async function renderSettings() {
         <span>${u.calls} consultas. Al llegar al límite la app sigue funcionando con el recetario.</span></div></div>
 ` : ""}
       <div class="item"><div class="txt"><b>Fotos de platos</b><span>${photoSummary(s.photos)}</span>
-        ${(s.photos.ok || 0) ? `<div style="margin-top:8px"><button class="btn sm" id="credits" style="background:var(--bg)">Ver créditos de las fotos</button></div>` : ""}</div></div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          ${(s.photos.ok || 0) ? `<button class="btn sm" id="credits" style="background:var(--bg)">Ver créditos de las fotos</button>` : ""}
+          ${(s.photos.missing || 0) + (s.photos.error || 0) ? `<button class="btn sm" id="photos-retry" style="background:var(--bg)">Buscar las que faltan</button>` : ""}
+        </div></div></div>
     </div>
 
     <h2 class="sec-h pad">Menú del cole</h2>
@@ -638,10 +666,33 @@ async function renderSettings() {
       : `<div class="item"><div class="txt">Ninguno todavía</div></div>`}</div>
 
     <h2 class="sec-h pad">Registro</h2>
-    <div class="group"><ul class="logs">${s.logs.map(l => `<li class="${l.level}">${esc(l.at)} · ${esc(l.message)}</li>`).join("") || "<li>Sin actividad</li>"}</ul></div>
+    <div class="group">
+      <div class="item" style="flex-wrap:wrap">
+        <div class="txt"><b>Qué se guarda</b><span>Con «Depuración» se guarda cada paso: búsquedas de fotos, respuestas de la IA, errores de las webs…</span></div>
+        <select id="loglevel" class="select" aria-label="Nivel del registro">
+          ${Object.entries(LOG_LEVELS).map(([k, v]) => `<option value="${k}" ${s.log_level === k ? "selected" : ""}>${v}</option>`).join("")}
+        </select>
+      </div>
+      <div class="log-filter" role="group" aria-label="Mostrar">
+        ${[["debug", "Todo"], ["info", "Información"], ["warn", "Avisos"], ["error", "Errores"]].map(([k, v]) =>
+          `<button class="chip ${k === logView.level ? "on" : ""}" data-loglevel="${k}">${v}</button>`).join("")}
+      </div>
+      <ul class="logs" id="logs"><li>Cargando…</li></ul>
+      <div class="item" style="gap:8px;flex-wrap:wrap">
+        <button class="btn sm" id="log-refresh" style="background:var(--bg)">Actualizar</button>
+        <button class="btn sm" id="log-copy" style="background:var(--bg)">Copiar</button>
+        <button class="btn sm" id="log-clear" style="background:var(--bg)">Vaciar</button>
+      </div>
+    </div>
     ${s.auth ? `<div class="pad"><a class="btn block" href="/logout">Cerrar sesión</a></div>` : ""}`;
 
   Install.renderCard($("#install-card"));
+  setupLogs();
+  $("#photos-retry")?.addEventListener("click", e => busy(e.currentTarget, async () => {
+    const r = await api("/api/photos/retry", { method: "POST" });
+    toast(r.count ? `Buscando ${r.count} fotos…` : "No hay fotos pendientes"); state.week = null; state.month = null;
+    renderSettings();
+  }));
   $("#credits")?.addEventListener("click", async () => {
     const r = await api("/api/photo-credits");
     sheet("Créditos de las fotos", r.credits.length
@@ -668,12 +719,56 @@ async function renderSettings() {
 function photoSummary(p) {
   if (!p.enabled) return "Desactivadas.";
   const by = p.by_source || {};
-  const web = (by.pexels || 0) + (by.wikimedia || 0) + (by.openverse || 0);
   const parts = [`${p.ok || 0} guardadas${by.ia ? ` (${by.ia} creadas con IA)` : ""}`];
-  if (p.pending) parts.push(`${p.pending} buscándose`);
-  let txt = parts.join(" · ") + ". Se buscan en internet y la IA ayuda a elegir la que muestra el plato. Si una no es correcta, pulsa el botón de recargar sobre la foto.";
+  const busy = (p.pending || 0);
+  if (busy) parts.push(`${busy} buscándose`);
+  const miss = (p.missing || 0) + (p.error || 0);
+  if (miss) parts.push(`${miss} sin foto`);
+  let txt = parts.join(" · ") + ". Se buscan en internet; si la coincidencia es dudosa, la IA confirma que es el plato"
+    + (p.ai ? " y, si no aparece ninguna, la crea." : ".")
+    + " Si una no es correcta, pulsa el botón de recargar sobre la foto.";
   if (!p.pexels) txt += " Para fotos de más calidad, añade una clave gratuita de Pexels (PEXELS_API_KEY).";
   return txt;
+}
+
+/* ---------- Registro ---------- */
+const LOG_LEVELS = { debug: "Depuración (todo)", info: "Información", warn: "Avisos y errores", error: "Solo errores" };
+const LOG_TAG = { debug: "DEBUG", info: "INFO", warn: "AVISO", error: "ERROR" };
+const logView = { level: "debug", rows: [], timer: null };
+
+async function loadLogs() {
+  const ul = $("#logs");
+  if (!ul) return;
+  try {
+    const r = await api(`/api/logs?level=${logView.level}&limit=400`);
+    logView.rows = r.logs;
+    const atBottom = ul.scrollTop < 8;
+    ul.innerHTML = r.logs.map(l => `<li class="${esc(l.level)}"><span class="lv">${LOG_TAG[l.level] || esc(l.level)}</span><time>${esc(l.at.slice(5))}</time> ${esc(l.message)}</li>`).join("")
+      || "<li>Sin entradas de este nivel</li>";
+    if (atBottom) ul.scrollTop = 0;
+  } catch (e) { ul.innerHTML = `<li class="error">${esc(e.message)}</li>`; }
+}
+
+function setupLogs() {
+  clearInterval(logView.timer);
+  loadLogs();
+  logView.timer = setInterval(() => { if (state.view === "settings" && $("#logs")) loadLogs(); else clearInterval(logView.timer); }, 5000);
+  $("#loglevel").onchange = async e => {
+    try { await api("/api/logs/level", { method: "POST", body: { level: e.target.value } }); toast(`Registro: ${LOG_LEVELS[e.target.value]}`); loadLogs(); }
+    catch (err) { toast(err.message); }
+  };
+  document.querySelectorAll("[data-loglevel]").forEach(b => b.onclick = () => {
+    logView.level = b.dataset.loglevel;
+    document.querySelectorAll("[data-loglevel]").forEach(x => x.classList.toggle("on", x === b));
+    loadLogs();
+  });
+  $("#log-refresh").onclick = loadLogs;
+  $("#log-copy").onclick = async () => {
+    const txt = logView.rows.map(l => `${l.at} [${l.level}] ${l.message}`).join("\n");
+    try { await navigator.clipboard.writeText(txt); toast("Registro copiado"); }
+    catch (_) { sheet("Registro", `<textarea style="width:100%;height:50vh;font:.75rem ui-monospace,monospace">${esc(txt)}</textarea>`, { ok: "", cancel: "Cerrar" }); }
+  };
+  $("#log-clear").onclick = async () => { await api("/api/logs", { method: "DELETE" }); loadLogs(); };
 }
 
 /* =========================================================

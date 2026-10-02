@@ -182,6 +182,7 @@ def status():
         "last_check": db.get_setting("last_check"),
         "last_check_result": db.get_setting("last_check_result"),
         "logs": logs,
+        "log_level": db.log_level(),
         "servings": config.SERVINGS,
         "auth": bool(config.APP_PASSWORD),
         "usage": ai.usage(),
@@ -194,12 +195,50 @@ def status():
 def photo():
     name = request.args.get("name", "")
     path, status = photos.lookup(name)
-    if path:
-        r = send_file(path, mimetype="image/webp", max_age=30 * 24 * 3600)
+    if request.args.get("check"):
+        r = jsonify({"status": status})
+        r.headers["Cache-Control"] = "no-store"
         return r
-    if status == "pending":
-        return jsonify({"status": "pending"}), 202
-    return jsonify({"status": "none"}), 404
+    if path:
+        return send_file(path, mimetype="image/webp", max_age=6 * 3600)  # con ETag: si cambia la foto, se nota
+    r = jsonify({"status": status})
+    r.status_code = 202 if status == "pending" else 404
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
+@app.post("/api/photos/retry")
+def photos_retry():
+    return {"count": photos.retry_missing()}
+
+
+@app.get("/api/logs")
+def logs():
+    level = request.args.get("level", "debug")
+    minimum = db.LEVELS.get(level, 10)
+    levels = [k for k, v in db.LEVELS.items() if v >= minimum]
+    limit = min(int(request.args.get("limit", 300) or 300), 1000)
+    with db.tx() as c:
+        rows = c.execute(f"SELECT id, at, level, message FROM log WHERE level IN ({','.join('?' * len(levels))}) "
+                         "ORDER BY id DESC LIMIT ?", (*levels, limit)).fetchall()
+    return {"logs": [dict(r) for r in rows], "level": db.log_level()}
+
+
+@app.post("/api/logs/level")
+def logs_level():
+    level = (request.get_json(force=True) or {}).get("level", "")
+    if level not in db.LEVELS:
+        return err("Nivel no válido")
+    db.set_log_level(level)
+    db.log(level if level != "debug" else "info", f"Nivel del registro: {level}")
+    return {"level": level}
+
+
+@app.delete("/api/logs")
+def logs_clear():
+    with db.tx() as c:
+        c.execute("DELETE FROM log")
+    return {"ok": True}
 
 
 @app.post("/api/photo/reject")
