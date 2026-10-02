@@ -68,9 +68,11 @@ function toast(msg) {
 }
 
 async function api(path, opts = {}) {
-  const o = { headers: {}, credentials: "same-origin", ...opts };
+  // redirect "manual": si Cloudflare Access (u otro proxy) pide volver a entrar, recargamos la página para que lo haga
+  const o = { headers: {}, credentials: "same-origin", redirect: "manual", ...opts };
   if (o.body && !(o.body instanceof FormData)) { o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(o.body); }
   const r = await fetch(path, o);
+  if (r.type === "opaqueredirect" || r.status === 0) { location.reload(); throw new Error("Volviendo a iniciar sesión…"); }
   if (r.status === 401) { location.href = "/login"; throw new Error("Sesión caducada"); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Error ${r.status}`);

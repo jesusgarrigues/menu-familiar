@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0B0B0B" media="(prefers-color-scheme: dark)">
   <!-- Web app instalable -->
-  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
   <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
@@ -17,7 +17,7 @@
   <meta name="apple-mobile-web-app-title" content="Menú">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="format-detection" content="telephone=no">
-  <link rel="stylesheet" href="/static/styles.css?v=2">
+  <link rel="stylesheet" href="/static/styles.css?v=3">
 </head>
 <body>
   <main id="view" aria-live="polite"></main>
@@ -55,6 +55,6 @@
 
   <div id="toast" role="status"></div>
   <datalist id="recipe-list"></datalist>
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

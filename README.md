@@ -62,7 +62,9 @@ La app se instala como una aplicación más, con su icono, a pantalla completa y
 > **Importante para Android:** para instalarla como app completa, el navegador exige **https**. Si entras por `http://192.168.x.x:8000`, en iPhone funciona igual, pero en Android solo se crea un acceso directo. Para tener https tienes estas opciones:
 > - **Tailscale** (gratis y lo más sencillo): instálalo en el equipo con Docker y en los móviles, y ejecuta `tailscale serve --bg 8000`. Así tienes `https://tu-equipo.tu-red.ts.net` desde cualquier sitio.
 > - **NAS Synology/QNAP:** usa su *proxy inverso* con un certificado Let's Encrypt.
-> - **Cloudflare Tunnel**, si quieres abrirla a internet. En ese caso, pon `APP_PASSWORD`.
+> - **Cloudflare Tunnel**, si quieres abrirla a internet. Protégela con **Cloudflare Access** o con `APP_PASSWORD`.
+>
+> **Con Cloudflare Access** no hace falta `APP_PASSWORD`. La app está preparada para Access: el manifiesto se pide con la cookie de sesión, y cuando la sesión caduca la página se recarga para volver a entrar. Si aun así la instalación falla, crea en Access una aplicación aparte con la política **Bypass** solo para estas rutas, que no contienen datos: `/manifest.webmanifest`, `/sw.js` y `/static/icons/*`.
 
 Si pones contraseña (`APP_PASSWORD`), la app muestra una pantalla de acceso y recuerda la sesión durante un año, también en la app instalada.
 
