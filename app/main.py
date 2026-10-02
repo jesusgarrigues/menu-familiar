@@ -1,8 +1,12 @@
 """API web (Flask) y servidor de la interfaz."""
+import base64
 import calendar
+import functools
+import json
 import os
 import secrets
 from datetime import date, timedelta
+from pathlib import Path
 
 from flask import Flask, abort, jsonify, redirect, request, send_file, send_from_directory, session
 
@@ -35,7 +39,8 @@ app.config.update(
 )
 
 # Rutas que no necesitan contraseña (el navegador las pide sin sesión al instalar la app)
-PUBLIC = ("/healthz", "/login", "/manifest.webmanifest", "/sw.js", "/static/icons/", "/static/login.css")
+PUBLIC = ("/healthz", "/login", "/manifest.webmanifest", "/sw.js", "/static/icons/", "/static/login.css",
+          "/apple-touch-icon", "/favicon")
 
 
 @app.before_request
@@ -60,7 +65,7 @@ def _pw_tag() -> str:
 LOGIN_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Menú familiar</title><link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" href="{apple_icon}">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#FFFFFF">
 <style>
 :root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff;color:#000}
@@ -87,7 +92,7 @@ def login():
             session["ok"] = _pw_tag()
             return redirect("/")
         error = '<p class="e">Contraseña incorrecta</p>'
-    return LOGIN_HTML.replace("{error}", error)
+    return LOGIN_HTML.replace("{error}", error).replace("{apple_icon}", _data_uri("apple-touch-icon.png"))
 
 
 @app.get("/logout")
@@ -98,9 +103,32 @@ def logout():
 
 @app.get("/manifest.webmanifest")
 def manifest():
-    r = send_from_directory(STATIC, "manifest.webmanifest", mimetype="application/manifest+json")
+    # Los iconos van incrustados: así se ven aunque un proxy (p. ej. Cloudflare Access) bloquee su descarga
+    data = json.loads((Path(STATIC) / "manifest.webmanifest").read_text(encoding="utf-8"))
+    for icon in data.get("icons", []):
+        if icon["src"].endswith(".png"):
+            icon["src"] = _data_uri(icon["src"].rsplit("/", 1)[-1])
+    r = app.response_class(json.dumps(data, ensure_ascii=False), mimetype="application/manifest+json")
     r.headers["Cache-Control"] = "no-cache"
     return r
+
+
+@functools.lru_cache(maxsize=8)
+def _data_uri(filename: str) -> str:
+    raw = (Path(STATIC) / "icons" / filename).read_bytes()
+    return "data:image/png;base64," + base64.b64encode(raw).decode()
+
+
+@app.get("/apple-touch-icon.png")
+@app.get("/apple-touch-icon-precomposed.png")
+@app.get("/apple-touch-icon-180x180.png")
+def apple_icon():
+    return send_from_directory(Path(STATIC) / "icons", "apple-touch-icon.png", mimetype="image/png", max_age=86400)
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return send_from_directory(Path(STATIC) / "icons", "favicon-32.png", mimetype="image/png", max_age=86400)
 
 
 @app.get("/sw.js")
@@ -124,7 +152,11 @@ def err(msg, code=400):
 
 @app.get("/")
 def index():
-    r = send_from_directory(STATIC, "index.html")
+    # El icono del iPhone va incrustado en la página: iOS lo guarda al «Añadir a pantalla de inicio»
+    # aunque Cloudflare Access u otro proxy bloquee la descarga del archivo del icono.
+    html = (Path(STATIC) / "index.html").read_text(encoding="utf-8")
+    html = html.replace('href="/static/icons/apple-touch-icon.png"', f'href="{_data_uri("apple-touch-icon.png")}"')
+    r = app.response_class(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-cache"
     return r
 

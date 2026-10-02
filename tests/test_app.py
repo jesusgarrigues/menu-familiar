@@ -164,7 +164,10 @@ class ApiTest(unittest.TestCase):
     def test_pwa_files(self):
         m = self.c.get("/manifest.webmanifest")
         self.assertEqual(m.status_code, 200)
-        self.assertIn("icon-maskable-512.png", m.get_data(as_text=True))
+        self.assertIn('"purpose": "maskable"', m.get_data(as_text=True))
+        self.assertIn("data:image/png;base64,", m.get_data(as_text=True))
+        self.assertIn('rel="apple-touch-icon" href="data:image/png;base64,', self.c.get("/").get_data(as_text=True))
+        self.assertEqual(self.c.get("/apple-touch-icon.png").status_code, 200)
         sw = self.c.get("/sw.js")
         self.assertEqual(sw.headers.get("Service-Worker-Allowed"), "/")
         for icon in ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):
