@@ -64,6 +64,7 @@ def available() -> bool:
 
 
 def photos_available() -> bool:
+    """Crear fotos con IA (desactivado por defecto: la IA se usa para BUSCARLAS, no para crearlas)."""
     return config.AI_PHOTOS and bool(config.OPENAI_API_KEY) and within_budget(config.AI_IMAGE_COST)
 
 
@@ -85,7 +86,8 @@ def _parse_json(text: str):
     return json.loads(text[start:])
 
 
-def complete_json(system: str, prompt: str, pdf_bytes: bytes | None = None, max_tokens: int = 4000, fast: bool = True):
+def complete_json(system: str, prompt: str, pdf_bytes: bytes | None = None, max_tokens: int = 4000, fast: bool = True,
+                  images: list[bytes] | None = None):
     provider = config.ai_provider()
     if not provider:
         raise AIError("No hay clave de IA configurada")
@@ -94,6 +96,9 @@ def complete_json(system: str, prompt: str, pdf_bytes: bytes | None = None, max_
     if provider == "openai":
         model = config.OPENAI_MODEL_FAST if fast and not pdf_bytes else config.OPENAI_MODEL
         content = [{"type": "text", "text": prompt}]
+        for img in images or []:
+            content.append({"type": "image_url", "image_url": {
+                "url": "data:image/jpeg;base64," + base64.b64encode(img).decode(), "detail": "low"}})
         if pdf_bytes:
             content.insert(0, {"type": "file", "file": {
                 "filename": "menu.pdf",
@@ -117,6 +122,9 @@ def complete_json(system: str, prompt: str, pdf_bytes: bytes | None = None, max_
 
     model = config.ANTHROPIC_MODEL
     content = [{"type": "text", "text": prompt}]
+    for img in images or []:
+        content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                    "data": base64.b64encode(img).decode()}})
     if pdf_bytes:
         content.insert(0, {"type": "document", "source": {
             "type": "base64", "media_type": "application/pdf",
@@ -215,10 +223,45 @@ Platos:
     return out
 
 
+def photo_queries(name: str) -> list[str]:
+    """Términos para buscar la foto del plato en bancos de imágenes."""
+    prompt = f"""Tarea: búsqueda de fotos.
+Para el plato «{name}», escribe 3 búsquedas cortas (2 a 4 palabras) para bancos de fotos como Wikimedia Commons o Pexels:
+la 1.ª en inglés describiendo cómo se ve servido en el plato, la 2.ª en español y la 3.ª en inglés más genérica.
+Si es una fruta o un postre suelto, deja claro que es comida (p. ej. "melon fruit slices").
+Formato: {{"queries": ["...", "...", "..."]}}"""
+    data = complete_json(SYSTEM, prompt, max_tokens=300)
+    return [str(q).strip() for q in data.get("queries", []) if str(q).strip()][:3]
+
+
+def pick_photo(name: str, images: list[bytes]) -> int | None:
+    """La IA mira las miniaturas y elige la que muestra el plato. Devuelve el índice o None si ninguna sirve."""
+    prompt = f"""Tarea: elegir foto.
+Te paso {len(images)} fotos numeradas desde 0 en el orden en que aparecen.
+¿Cuál muestra mejor el plato «{name}» tal como se serviría en casa? Debe verse claramente la comida, ser apetecible,
+sin texto grande, sin personas como protagonistas y sin ser un edificio, un lugar, un mapa o un producto envasado.
+Si ninguna muestra ese plato (o algo muy parecido), responde -1.
+Formato: {{"best": 0}}"""
+    data = complete_json(SYSTEM, prompt, max_tokens=200, images=images)
+    try:
+        best = int(data.get("best", -1))
+    except (TypeError, ValueError):
+        return None
+    return best if best >= 0 else None
+
+
+_last_image = [0.0]
+
+
 def generate_photo(name: str) -> bytes:
     """Foto del plato en calidad baja (la más barata). Devuelve los bytes de la imagen."""
     if not photos_available():
         raise AIError("Fotos con IA no disponibles (sin clave de OpenAI o límite alcanzado)")
+    # Respeta el límite de OpenAI (5 imágenes por minuto en cuentas nuevas)
+    wait = 13 - (time.time() - _last_image[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last_image[0] = time.time()
     prompt = (f"Fotografía gastronómica realista de un plato casero español para niños: {name}. "
               "Ración familiar servida en un plato blanco sencillo sobre una mesa de madera clara, luz natural, "
               "vista ligeramente cenital, apetecible, estilo foto de app de comida a domicilio. "

@@ -1,11 +1,11 @@
 /* Service worker: la app abre al instante y se puede consultar sin conexión. */
-const VERSION = "v5";
+const VERSION = "v6";
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 const ASSETS = [
   "/",
-  "/static/styles.css?v=5",
-  "/static/app.js?v=5",
+  "/static/styles.css?v=6",
+  "/static/app.js?v=6",
   "/manifest.webmanifest",
   "/static/icons/icon-192.png",
   "/static/icons/icon-512.png",

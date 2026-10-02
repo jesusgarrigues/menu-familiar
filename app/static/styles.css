@@ -97,6 +97,13 @@ main { max-width: 820px; margin: 0 auto; padding: calc(14px + env(safe-area-inse
 .ph img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .35s; }
 .ph.loaded img { opacity: 1; }
 .ph.loaded .ph-ico { visibility: hidden; }
+.ph-retry {
+  position: absolute; z-index: 2; right: 10px; top: 10px; width: 32px; height: 32px; border-radius: 50%; border: 0;
+  background: rgba(0,0,0,.45); color: #fff; display: none; place-items: center; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.ph.loaded .ph-retry { display: grid; }
+.ph-retry svg { width: 16px; height: 16px; stroke-width: 2.4; }
+.ph-hero .ph-retry { top: auto; bottom: 12px; }
 .g-pescado { --tile: #D5DEE3; } .g-carne { --tile: #E8D6CC; } .g-huevo { --tile: #EDE5C6; } .g-legumbre { --tile: #E2D6C3; }
 .g-pasta { --tile: #EEE0C6; } .g-arroz { --tile: #EDE3CF; } .g-verdura { --tile: #D8E6D2; } .g-patata { --tile: #ECE1C8; }
 .g-lacteo { --tile: #E4E6EC; } .g-fruta { --tile: #F0D9D9; } .g-otro { --tile: #E7E2DC; }

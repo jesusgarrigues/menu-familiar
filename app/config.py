@@ -27,7 +27,8 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 # Modelo barato para proponer platos e ingredientes (el de arriba solo se usa para leer el PDF)
 OPENAI_MODEL_FAST = os.getenv("OPENAI_MODEL_FAST", "gpt-5-nano")
 OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1-mini")
-AI_PHOTOS = os.getenv("AI_PHOTOS", "true").lower() in ("1", "true", "yes", "si", "sí")
+# Crear fotos con IA cuando no se encuentra ninguna en internet. Desactivado: la IA se usa para buscarlas.
+AI_PHOTOS = os.getenv("AI_PHOTOS", "false").lower() in ("1", "true", "yes", "si", "sí")
 # Fotos: primero se buscan en internet (gratis); la IA solo si no aparece ninguna adecuada
 PHOTOS_WEB = os.getenv("PHOTOS_WEB", "true").lower() in ("1", "true", "yes", "si", "sí")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")  # opcional y gratis: mejores fotos

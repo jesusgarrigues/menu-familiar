@@ -1,14 +1,18 @@
-"""Búsqueda de fotos de platos en internet (gratis) antes de recurrir a la IA.
+"""Búsqueda de fotos de platos en internet, con la IA como «buscadora» (no se generan imágenes).
 
-Orden: Pexels (si hay PEXELS_API_KEY, fotos de mucha calidad) → Wikimedia Commons → Openverse.
-Solo se aceptan fotos cuyo título o descripción encaja con el nombre del plato.
-Se guarda el autor y la licencia de cada foto para mostrar los créditos en Ajustes.
+1. La IA (modelo barato) propone buenos términos de búsqueda para el plato (en inglés y en español).
+2. Se reúnen candidatas de Pexels (si hay PEXELS_API_KEY), Wikimedia Commons y Openverse.
+3. La IA mira miniaturas de las candidatas y elige la que de verdad muestra el plato
+   (así se evitan errores como «Melón», que también es un pueblo de Ourense).
+Sin IA se usa un filtro por palabras. Se guardan autor y licencia para los créditos.
 """
+import base64
+import io
 import re
 
 import requests
 
-from . import config
+from . import ai, config, db
 from .text import norm
 
 UA = {"User-Agent": "menu-familiar/1.0 (https://github.com/jesusgarrigues/menu-familiar; app familiar de menús)"}
@@ -35,12 +39,52 @@ def relevance(name: str, text: str) -> float:
     return score
 
 
+# Palabras que indican que la foto es de comida (en títulos, descripciones o categorías)
+FOOD = re.compile(r"\b(food|dish|cuisine|meal|recipe|cooking|cooked|fruit|vegetable|dessert|soup|salad|stew|breakfast|lunch|dinner|"
+                  r"comida|plato|platos|cocina|receta|gastronom\w*|aliment\w*|fruta|frutas|verdura|verduras|postre|sopa|ensalada|"
+                  r"guiso|estofado|guisado|tapa|menu|men[uú])\b", re.I)
+# Palabras que indican que NO es comida (pueblos, edificios, mapas...)
+NOT_FOOD = re.compile(r"\b(ayuntamiento|concello|casa do concello|town ?hall|municipality|municipio|village|aldea|iglesia|"
+                      r"church|igrexa|map|mapa|escudo|coat of arms|bandera|flag|street|calle|r[uú]a|station|estaci[oó]n|"
+                      r"building|edificio|bridge|puente|river|r[ií]o|mountain|monta[nñ]a|portrait|retrato|football|f[uú]tbol|"
+                      r"logo|sign|cartel|aerial|panor[aá]mica|skyline|castle|castillo)\b", re.I)
+
+# Alimentos sueltos con nombre ambiguo: se buscan con un término más claro
+SIMPLE = {
+    "melon": "melon fruit", "sandia": "watermelon fruit", "naranja": "orange fruit", "platano": "banana fruit",
+    "pera": "pear fruit", "manzana": "apple fruit", "kiwi": "kiwifruit", "mandarina": "mandarin orange fruit",
+    "uva": "grapes fruit", "uvas": "grapes fruit", "pina": "pineapple fruit", "fresa": "strawberries fruit",
+    "fresas": "strawberries fruit", "melocoton": "peach fruit", "yogur": "yogurt bowl", "natillas": "natillas custard dessert",
+    "flan": "flan caramel dessert", "fruta": "fresh fruit bowl", "fruta temporada": "fresh fruit bowl",
+    "pan": "bread loaf", "arroz con leche": "arroz con leche dessert", "cuajada": "cuajada dessert",
+}
+
+
 def queries(name: str) -> list[str]:
     words = _words(name)
-    out = [name]
+    out = []
+    simple = SIMPLE.get(" ".join(words))
+    if simple:
+        out.append(simple)
+    out.append(name)
     if len(words) > 2:
         out.append(" ".join(words[:2]))
     return list(dict.fromkeys(q for q in out if q))
+
+
+def looks_like_food(name: str, text: str, query: str) -> bool:
+    """Evita fotos que no son de comida (p. ej. «Melón», que también es un pueblo de Ourense)."""
+    if NOT_FOOD.search(text or ""):
+        return False
+    if relevance(name, text) >= 0.5 and len(_words(name)) >= 2 and FOOD.search(text or ""):
+        return True
+    if query in SIMPLE.values():
+        eng = query.split()[0]
+        return eng[:5].lower() in norm(text) and not NOT_FOOD.search(text)
+    # Platos de varias palabras muy específicas ("lentejas estofadas") o con contexto de comida
+    if relevance(name, text) >= 0.5 and (len(_words(name)) >= 2 or FOOD.search(text or "")):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +102,8 @@ def pexels(q: str) -> list[dict]:
         return []
     out = []
     for p in r.json().get("photos", []):
-        out.append({"url": p["src"].get("large") or p["src"].get("medium"), "title": p.get("alt") or q,
+        out.append({"url": p["src"].get("large") or p["src"].get("medium"), "thumb": p["src"].get("medium"),
+                    "title": p.get("alt") or q,
                     "credit": f"{p.get('photographer', '')} (Pexels)", "credit_url": p.get("url", ""),
                     "license": "Licencia Pexels", "source": "pexels", "trusted": True})
     return out
@@ -80,7 +125,10 @@ def wikimedia(q: str) -> list[dict]:
         meta = info.get("extmetadata") or {}
         artist = re.sub(r"<[^>]+>", "", (meta.get("Artist") or {}).get("value", "")).strip()
         desc = re.sub(r"<[^>]+>", "", (meta.get("ImageDescription") or {}).get("value", ""))
-        out.append({"url": info.get("thumburl") or info.get("url"), "title": f"{p.get('title', '')} {desc}"[:400],
+        cats = (meta.get("Categories") or {}).get("value", "").replace("|", " ")
+        thumb = (info.get("thumburl") or "").replace("/800px-", "/320px-") or None
+        out.append({"url": info.get("thumburl") or info.get("url"), "thumb": thumb,
+                    "title": f"{p.get('title', '')} {desc} {cats}"[:800],
                     "credit": f"{artist or 'Autor desconocido'} (Wikimedia Commons)",
                     "credit_url": info.get("descriptionurl", ""),
                     "license": (meta.get("LicenseShortName") or {}).get("value", ""), "source": "wikimedia"})
@@ -98,7 +146,7 @@ def openverse(q: str) -> list[dict]:
             continue
         tags = " ".join(t.get("name", "") for t in it.get("tags") or [])
         lic = f"CC {str(it.get('license', '')).upper()} {it.get('license_version', '')}".strip()
-        out.append({"url": it.get("url"), "title": f"{it.get('title', '')} {tags}"[:400],
+        out.append({"url": it.get("url"), "thumb": it.get("thumbnail"), "title": f"{it.get('title', '')} {tags}"[:400],
                     "credit": f"{it.get('creator') or 'Autor desconocido'} (Openverse)",
                     "credit_url": it.get("foreign_landing_url", ""), "license": lic, "source": "openverse"})
     return out
@@ -107,23 +155,92 @@ def openverse(q: str) -> list[dict]:
 PROVIDERS = [pexels, wikimedia, openverse]
 
 
-def find_photo(name: str) -> tuple[bytes, dict] | None:
-    """Busca una foto adecuada del plato. Devuelve (bytes, créditos) o None."""
-    for q in queries(name):
+def _thumb_jpeg(url: str) -> bytes | None:
+    """Descarga una miniatura y la reduce (para que la IA la mire gastando muy poco)."""
+    try:
+        r = requests.get(url, headers=UA, timeout=TIMEOUT)
+        if not r.ok or not r.headers.get("content-type", "").startswith("image/"):
+            return None
+        from PIL import Image
+        im = Image.open(io.BytesIO(r.content)).convert("RGB")
+        im.thumbnail((256, 256))
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=70)
+        return out.getvalue()
+    except Exception:
+        return None
+
+
+def _candidates(name: str, qs: list[str], blocked: set[str]) -> list[dict]:
+    cands, seen = [], set()
+    for q in qs:
         for provider in PROVIDERS:
             try:
-                cands = provider(q)
+                res = provider(q)
             except requests.RequestException:
                 continue
-            for c in cands:
-                if not c.get("url"):
+            for c in res:
+                url = c.get("url")
+                if not url or url in blocked or url in seen or NOT_FOOD.search(c.get("title", "")):
                     continue
-                if not c.get("trusted") and relevance(name, c["title"]) < 0.5:
-                    continue
-                try:
-                    img = requests.get(c["url"], headers=UA, timeout=TIMEOUT)
-                except requests.RequestException:
-                    continue
-                if img.ok and img.headers.get("content-type", "").startswith("image/") and len(img.content) < 12_000_000:
-                    return img.content, {k: c.get(k, "") for k in ("source", "credit", "credit_url", "license")}
+                seen.add(url)
+                cands.append(dict(c, query=q))
+        if len(cands) >= 16:
+            break
+    return cands
+
+
+def _download(c: dict):
+    try:
+        img = requests.get(c["url"], headers=UA, timeout=TIMEOUT)
+    except requests.RequestException:
+        return None
+    if img.ok and img.headers.get("content-type", "").startswith("image/") and len(img.content) < 12_000_000:
+        return img.content, {k: c.get(k, "") for k in ("source", "credit", "credit_url", "license", "url")}
+    return None
+
+
+def find_photo(name: str, blocked: set[str] | None = None) -> tuple[bytes, dict] | None:
+    """Busca una foto adecuada del plato. Devuelve (bytes, créditos) o None."""
+    blocked = blocked or set()
+    use_ai = ai.available()
+    qs = queries(name)
+    if use_ai:
+        try:
+            qs = list(dict.fromkeys(ai.photo_queries(name) + qs))[:4]
+        except Exception as e:
+            db.log("warn", f"IA no disponible para buscar fotos ({e})")
+            use_ai = False
+    cands = _candidates(name, qs, blocked)
+    if not cands:
+        return None
+    if use_ai:
+        # La IA elige entre miniaturas, en tandas de 6 (máximo 2 tandas)
+        for start in (0, 6):
+            batch = [c for c in cands[start:start + 6]]
+            imgs, pool = [], []
+            for c in batch:
+                t = _thumb_jpeg(c.get("thumb") or c["url"])
+                if t:
+                    imgs.append(t)
+                    pool.append(c)
+            if not pool:
+                continue
+            try:
+                best = ai.pick_photo(name, imgs)
+            except Exception as e:
+                db.log("warn", f"IA no disponible para elegir foto ({e})")
+                break
+            if best is not None and 0 <= best < len(pool):
+                got = _download(pool[best])
+                if got:
+                    return got
+        else:
+            return None  # la IA ha visto las candidatas y ninguna muestra el plato
+    # Sin IA (o si falla): filtro por palabras
+    for c in cands:
+        if c.get("trusted") or looks_like_food(name, c.get("title", ""), c.get("query", "")):
+            got = _download(c)
+            if got:
+                return got
     return None

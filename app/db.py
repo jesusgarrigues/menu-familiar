@@ -117,7 +117,8 @@ def init():
     with tx() as c:
         c.executescript(SCHEMA)
         # Migraciones sencillas para bases de datos de versiones anteriores
-        for col in ("source TEXT", "credit TEXT", "credit_url TEXT", "license TEXT"):
+        c.execute("CREATE TABLE IF NOT EXISTS photo_block (key TEXT, url TEXT, PRIMARY KEY (key, url))")
+        for col in ("source TEXT", "credit TEXT", "credit_url TEXT", "license TEXT", "url TEXT", "updated TEXT"):
             try:
                 c.execute(f"ALTER TABLE photos ADD COLUMN {col}")
             except sqlite3.OperationalError:

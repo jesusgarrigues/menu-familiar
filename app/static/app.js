@@ -70,13 +70,30 @@ function courses(dishes) {
 }
 
 /* Foto de un plato: marcador de color con icono; encima, la foto real cuando existe */
-function photo(name, cls = "") {
+function photo(name, cls = "", { retry = false } = {}) {
   const g = mainGroup(name);
+  const again = retry && state.photos && name
+    ? `<button class="ph-retry" data-reject="${esc(name)}" aria-label="Buscar otra foto de ${esc(name)}" title="Buscar otra foto">${ICON.refresh}</button>` : "";
   const img = state.photos && name
     ? `<img alt="" loading="lazy" decoding="async" src="/api/photo?name=${encodeURIComponent(name)}" onload="this.parentNode.classList.add('loaded')" onerror="photoRetry(this)">`
     : "";
-  return `<div class="ph g-${g} ${cls}" role="img" aria-label="${esc(name ? "Foto: " + name : "Sin foto")}"><span class="ph-ico">${ICON.camera}</span>${img}</div>`;
+  return `<div class="ph g-${g} ${cls}" role="img" aria-label="${esc(name ? "Foto: " + name : "Sin foto")}"><span class="ph-ico">${ICON.camera}</span>${img}${again}</div>`;
 }
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-reject]");
+  if (!b) return;
+  e.stopPropagation();
+  b.disabled = true;
+  try {
+    await api("/api/photo/reject", { method: "POST", body: { name: b.dataset.reject } });
+    toast("Buscando otra foto…");
+    const ph = b.closest(".ph");
+    ph.classList.remove("loaded");
+    const img = ph.querySelector("img");
+    if (img) { img.dataset.tries = 0; setTimeout(() => { img.src = img.src.replace(/&t=\d+$/, "") + `&t=${Date.now()}`; }, 5000); }
+  } catch (err) { toast(err.message); } finally { b.disabled = false; }
+}, true);
+
 window.photoRetry = img => {
   const n = Number(img.dataset.tries || 0);
   if (n >= 8) { img.remove(); return; }
@@ -137,7 +154,7 @@ function schoolCard(day, { compact = false } = {}) {
     </div>`).join("");
   const list = courses(s.dishes);
   const slides = compact ? "" : `<div class="sc-carousel" data-carousel>
-      <div class="sc-slides">${list.map(c => `<div class="sc-slide">${photo(c.dish, "ph-school")}
+      <div class="sc-slides">${list.map(c => `<div class="sc-slide">${photo(c.dish, "ph-school", { retry: true })}
         <span class="sc-cap"><b>${c.label}</b> ${esc(c.dish)}</span></div>`).join("")}</div>
       ${list.length > 1 ? `<div class="sc-dots">${list.map((c, i) => `<button class="sc-dot ${i ? "" : "on"}" data-i="${i}" aria-label="Ver ${esc(c.dish)}"></button>`).join("")}</div>` : ""}
     </div>`;
@@ -196,7 +213,7 @@ function mealBlock(day, meal, { title, deficits, compact = false } = {}) {
   const others = (p.options || []).map((o, i) => ({ o, i })).filter(({ o }) => !ch || o.name !== ch.name);
   const outTxt = meal === "cena" ? "Cenamos fuera" : "Comemos fuera";
   const hero = ch
-    ? `<div class="hero">${photo(ch.name, compact ? "ph-sq" : "ph-hero")}
+    ? `<div class="hero">${photo(ch.name, compact ? "ph-sq" : "ph-hero", { retry: !compact })}
         ${compact ? "" : `${badge(ch, deficits)}<span class="badge right">${ICON.check}Elegida</span>`}
         <div class="hero-txt"><div class="dish-title">${esc(ch.name)}</div>
         <div class="meta">${esc(groupMeta(ch))}${ch.ingredients?.length ? ` · ${ch.ingredients.length} ingredientes` : ""}</div></div></div>`
@@ -590,10 +607,10 @@ async function renderSettings() {
     <h2 class="sec-h pad">Inteligencia artificial</h2>
     <div class="group">
       <div class="item"><div class="txt"><b>${s.ai ? `Activada (${esc(s.ai)})` : "Sin IA"}</b>
-        <span>${s.ai ? "Lee el PDF, propone cenas cuando el recetario no tiene suficientes y crea las fotos que no aparecen en internet." : "Añade OPENAI_API_KEY para leer mejor el PDF y crear las fotos que no aparezcan en internet."}</span></div></div>
+        <span>${s.ai ? "Lee el PDF, propone cenas cuando el recetario no tiene suficientes y ayuda a encontrar la foto correcta de cada plato." : "Añade OPENAI_API_KEY para leer mejor el PDF y elegir mejor las fotos de los platos."}</span></div></div>
       ${s.ai ? `<div class="item"><div class="txt"><b>Gasto de este mes: ${u.cost.toFixed(2)} $ de ${u.budget.toFixed(2)} $</b>
         <div class="progress" style="margin:8px 0 6px"><i style="width:${pct}%"></i></div>
-        <span>${u.calls} consultas · ${u.images} fotos nuevas. Al llegar al límite la app sigue funcionando con el recetario.</span></div></div>
+        <span>${u.calls} consultas. Al llegar al límite la app sigue funcionando con el recetario.</span></div></div>
 ` : ""}
       <div class="item"><div class="txt"><b>Fotos de platos</b><span>${photoSummary(s.photos)}</span>
         ${(s.photos.ok || 0) ? `<div style="margin-top:8px"><button class="btn sm" id="credits" style="background:var(--bg)">Ver créditos de las fotos</button></div>` : ""}</div></div>
@@ -652,11 +669,10 @@ function photoSummary(p) {
   if (!p.enabled) return "Desactivadas.";
   const by = p.by_source || {};
   const web = (by.pexels || 0) + (by.wikimedia || 0) + (by.openverse || 0);
-  const parts = [`${p.ok || 0} guardadas (${web} de internet, ${by.ia || 0} creadas con IA)`];
+  const parts = [`${p.ok || 0} guardadas${by.ia ? ` (${by.ia} creadas con IA)` : ""}`];
   if (p.pending) parts.push(`${p.pending} buscándose`);
-  let txt = parts.join(" · ") + ". Primero se buscan en internet; la IA solo crea las que no aparecen.";
+  let txt = parts.join(" · ") + ". Se buscan en internet y la IA ayuda a elegir la que muestra el plato. Si una no es correcta, pulsa el botón de recargar sobre la foto.";
   if (!p.pexels) txt += " Para fotos de más calidad, añade una clave gratuita de Pexels (PEXELS_API_KEY).";
-  if (!p.ai) txt += " Sin clave de OpenAI (o con el límite alcanzado) no se crean fotos con IA.";
   return txt;
 }
 

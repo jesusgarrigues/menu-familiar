@@ -87,6 +87,33 @@ class PlannerTest(unittest.TestCase):
         self.assertEqual(status, "ok")
         self.assertEqual(photos.credits()[0]["license"], "CC BY-SA 4.0")
 
+    def test_ai_picks_photo(self):
+        import io as _io
+        from unittest import mock
+        from PIL import Image
+        from app import photo_sources
+        buf = _io.BytesIO(); Image.new("RGB", (400, 300), (200, 160, 60)).save(buf, "JPEG")
+
+        class R:
+            ok = True
+            headers = {"content-type": "image/jpeg"}
+            content = buf.getvalue()
+
+        cands = [
+            {"url": "https://x/ayto.jpg", "title": "Casa do Concello de Melón", "source": "wikimedia"},
+            {"url": "https://x/a.jpg", "title": "Melón 1", "source": "wikimedia"},
+            {"url": "https://x/b.jpg", "title": "Cantaloupe", "source": "openverse", "credit": "Ana", "license": "CC BY 2.0"},
+        ]
+        with mock.patch("app.ai.available", return_value=True), \
+             mock.patch("app.ai.photo_queries", return_value=["melon fruit slices"]), \
+             mock.patch("app.ai.pick_photo", return_value=1) as pick, \
+             mock.patch.object(photo_sources, "PROVIDERS", [lambda q: cands]), \
+             mock.patch("app.photo_sources.requests.get", return_value=R()):
+            data, credit = photo_sources.find_photo("Melón")
+        # el ayuntamiento se descarta antes de preguntar a la IA; la IA elige la 2.ª de las que quedan
+        self.assertEqual(len(pick.call_args[0][1]), 2)
+        self.assertEqual(credit["url"], "https://x/b.jpg")
+
     def test_sum_qty(self):
         self.assertEqual(planner.sum_qty(["500 g", "1 kg", "2 latas", "1 lata"]), "1,5 kg + 3 latas")
 

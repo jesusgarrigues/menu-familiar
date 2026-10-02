@@ -17,9 +17,9 @@ Con una clave de **OpenAI** (o de Anthropic, que no hace fotos):
 
 - **Lee el PDF del cole** una vez al mes, incluso si tiene tablas raras.
 - **Propone cenas** cuando el recetario no tiene al menos 3 platos que cumplan lo que recomienda el cole.
-- **Crea la foto de un plato** solo si no se encuentra ninguna en internet (ver abajo).
+- **Ayuda a encontrar la foto correcta** de cada plato en internet (ver abajo).
 
-**Fotos de los platos.** Primero se buscan gratis en internet: en **Pexels** (si añades una clave gratuita en `PEXELS_API_KEY`, conseguida en [pexels.com/api](https://www.pexels.com/api/)), en **Wikimedia Commons** y en **Openverse**. Solo se aceptan si el título de la foto coincide con el plato. Si no aparece ninguna, se crea con IA. Cada foto se consigue una vez y se guarda para siempre. Los créditos de las fotos de internet se pueden ver en Ajustes.
+**Fotos de los platos.** Se buscan en internet: en **Pexels** (si añades una clave gratuita en `PEXELS_API_KEY`, conseguida en [pexels.com/api](https://www.pexels.com/api/)), en **Wikimedia Commons** y en **Openverse**. La IA no crea imágenes: propone buenos términos de búsqueda y mira las miniaturas para elegir la que de verdad muestra el plato. Así se evitan errores como «Melón», que también es un pueblo. Cada foto se consigue una vez y se guarda. Si alguna no es correcta, pulsa el botón de recargar que aparece sobre ella y la app buscará otra; la descartada no vuelve a salir. Los créditos de las fotos se ven en Ajustes.
 
 Para gastar lo mínimo sin que se note:
 
@@ -31,8 +31,8 @@ Para gastar lo mínimo sin que se note:
 | Modelo muy barato (`gpt-5-nano`) para platos; el normal solo para el PDF | Unas 10 veces más barato por llamada |
 | Ingredientes solo del plato elegido y en lote | Respuestas más cortas |
 | Instrucciones fijas siempre iguales y al principio | Descuento automático del proveedor por caché |
-| Fotos de internet primero; la IA solo para las que no aparecen | La mayoría de fotos no cuestan nada |
-| Fotos de IA en calidad baja y tamaño móvil, una por plato; los nombres casi iguales comparten foto | Unos 0,005 $ por foto, solo la primera vez |
+| Fotos de internet; la IA solo las busca y elige mirando miniaturas pequeñas, no las crea | Fracciones de céntimo por foto, y sin límites de creación de imágenes |
+| Una foto por plato, guardada para siempre; los nombres casi iguales comparten foto | Cada foto se busca una sola vez |
 | Recetario con platos que gustan a los niños y verdura integrada | Las propuestas encajan a la primera y se piden menos ideas |
 | Tope mensual (`AI_MONTHLY_BUDGET`, por defecto 1 $) | Al llegar al tope, la app sigue con el recetario y sin fotos nuevas |
 
@@ -101,7 +101,7 @@ Si pones contraseña (`APP_PASSWORD`), la app muestra una pantalla de acceso y r
 | `OPENAI_IMAGE_MODEL` | `gpt-image-1-mini` | Modelo para las fotos de los platos. |
 | `PEXELS_API_KEY` | — | Clave gratuita de Pexels para fotos de más calidad (opcional). |
 | `PHOTOS_WEB` | `true` | Buscar las fotos de los platos en internet antes de usar la IA. |
-| `AI_PHOTOS` | `true` | Crear con IA las fotos que no aparezcan en internet (necesita clave de OpenAI). |
+| `AI_PHOTOS` | `false` | Crear con IA las fotos que no aparezcan en internet (desactivado: la IA solo las busca). |
 | `AI_MONTHLY_BUDGET` | `1` | Tope de gasto en IA al mes, en dólares. |
 | `SERVINGS` | `4` | Comensales (para las cantidades que propone la IA). |
 

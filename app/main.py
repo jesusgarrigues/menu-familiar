@@ -14,6 +14,7 @@ app = Flask(__name__, static_folder=STATIC, static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024
 
 db.init()
+photos.migrate()
 
 
 def _secret_key() -> bytes:
@@ -167,6 +168,14 @@ def photo():
     if status == "pending":
         return jsonify({"status": "pending"}), 202
     return jsonify({"status": "none"}), 404
+
+
+@app.post("/api/photo/reject")
+def photo_reject():
+    name = (request.get_json(force=True) or {}).get("name", "")
+    if not name:
+        return err("Falta el plato")
+    return {"status": photos.reject(name)}
 
 
 @app.get("/api/photo-credits")

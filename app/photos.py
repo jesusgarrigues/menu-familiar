@@ -1,7 +1,8 @@
 """Fotos de los platos: se consiguen UNA vez por plato y se guardan para siempre.
 
-- Primero se buscan en internet (Pexels, Wikimedia Commons, Openverse): gratis.
-- Solo si no aparece ninguna adecuada se crea con IA (calidad baja, unos 0,005 $).
+- Se buscan en internet (Pexels, Wikimedia Commons, Openverse) y la IA ayuda a encontrarlas y a elegir
+  la buena (no se generan imágenes, salvo que se active AI_PHOTOS).
+- Si una foto no es correcta, desde la app se puede pedir otra (la descartada no vuelve a salir).
 - Los nombres parecidos comparten foto ("Cocido completo" / "Cocido madrileño", "Pasta integral boloñesa" /
   "Pasta a la boloñesa").
 - Se consiguen en segundo plano y de una en una, solo cuando el plato aparece en pantalla.
@@ -11,6 +12,7 @@ import io
 import queue
 import re
 import threading
+import time
 
 from . import ai, config, db, photo_sources
 from .text import ALLERGEN_RE, norm
@@ -83,7 +85,10 @@ def lookup(name: str):
         _ensure_worker()
         return None, "pending"
     if row and row["status"] in ("error", "missing"):
-        return None, "none"
+        # Reintento: errores pasados 30 min; fotos no encontradas, pasados 3 días
+        wait = 1800 if row["status"] == "error" else 3 * 86400
+        if time.time() - _ts(row["updated"] or row["created"]) < wait:
+            return None, "none"
     if not enabled():
         return None, "none"
     with db.tx() as c:
@@ -92,6 +97,46 @@ def lookup(name: str):
     _q.put((key, name))
     _ensure_worker()
     return None, "pending"
+
+
+def _ts(s: str | None) -> float:
+    try:
+        return time.mktime(time.strptime(s, "%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        return 0.0
+
+
+def reject(name: str) -> str:
+    """La foto no es correcta: se descarta para siempre y se busca otra."""
+    key = key_for(name)
+    with db.tx() as c:
+        row = c.execute("SELECT * FROM photos WHERE key=?", (key,)).fetchone()
+        if row and row["url"]:
+            c.execute("INSERT OR IGNORE INTO photo_block(key, url) VALUES(?,?)", (key, row["url"]))
+        c.execute("INSERT OR REPLACE INTO photos(key, name, file, status) VALUES(?,?,?,'pending')",
+                  (key, name, _file_for(key)))
+    try:
+        (config.PHOTO_DIR / _file_for(key)).unlink()
+    except FileNotFoundError:
+        pass
+    _q.put((key, name))
+    _ensure_worker()
+    return "pending"
+
+
+def migrate():
+    """Una sola vez: vuelve a buscar las fotos elegidas con el método antiguo (sin revisión de la IA)."""
+    if db.get_setting("photos_rev") == "2":
+        return
+    with db.tx() as c:
+        rows = c.execute("SELECT key, file FROM photos WHERE status!='ok' OR source IN ('wikimedia','openverse')").fetchall()
+        for r in rows:
+            try:
+                (config.PHOTO_DIR / r["file"]).unlink()
+            except (FileNotFoundError, TypeError):
+                pass
+        c.execute("DELETE FROM photos WHERE status!='ok' OR source IN ('wikimedia','openverse')")
+    db.set_setting("photos_rev", "2")
 
 
 def _ensure_worker():
@@ -108,12 +153,12 @@ def _ensure_worker():
 
 
 def _worker():
-    done: set[str] = set()
     while True:
         key, name = _q.get()
-        if key in done:
-            continue
-        done.add(key)
+        with db.tx() as c:
+            row = c.execute("SELECT status FROM photos WHERE key=?", (key,)).fetchone()
+        if row and row["status"] != "pending":
+            continue  # ya resuelta (estaba repetida en la cola)
         _worker_once(key, name)
 
 
@@ -123,8 +168,10 @@ def _worker_once(key: str, name: str):
         c.execute("INSERT OR IGNORE INTO photos(key, name, file, status) VALUES(?,?,?,'pending')",
                   (key, name, _file_for(key)))
     status, credit = "missing", {}
+    with db.tx() as c:
+        blocked = {r["url"] for r in c.execute("SELECT url FROM photo_block WHERE key=?", (key,))}
     try:
-        found = photo_sources.find_photo(name) if config.PHOTOS_WEB else None
+        found = photo_sources.find_photo(name, blocked) if config.PHOTOS_WEB else None
         if found:
             data, credit = found
         elif ai.photos_available():
@@ -139,9 +186,10 @@ def _worker_once(key: str, name: str):
         db.log("warn", f"No se pudo conseguir la foto de «{name}»: {e}")
         status = "error"
     with db.tx() as c:
-        c.execute("UPDATE photos SET status=?, source=?, credit=?, credit_url=?, license=? WHERE key=?",
+        c.execute("UPDATE photos SET status=?, source=?, credit=?, credit_url=?, license=?, url=?, "
+                  "updated=datetime('now','localtime') WHERE key=?",
                   (status, credit.get("source"), credit.get("credit"), credit.get("credit_url"),
-                   credit.get("license"), key))
+                   credit.get("license"), credit.get("url"), key))
 
 
 def _shrink(data: bytes, size: int = 640) -> bytes:
@@ -159,6 +207,7 @@ def _shrink(data: bytes, size: int = 640) -> bytes:
 
 def enabled() -> bool:
     return config.PHOTOS_WEB or ai.photos_available()
+
 
 
 def stats() -> dict:
