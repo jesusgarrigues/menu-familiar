@@ -1,6 +1,6 @@
 services:
   menu-familiar:
-    image: ghcr.io/jesusgarrigues/menu-familiar:latest
+    image: jesusgarrigues/menu-familiar:latest
     # Para construir desde el código en lugar de usar la imagen publicada:
     # build: .
     container_name: menu-familiar

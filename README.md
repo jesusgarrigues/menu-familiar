@@ -38,12 +38,18 @@ O con un solo comando:
 
 ```bash
 docker run -d --name menu-familiar -p 8000:8000 -v $(pwd)/data:/data \
-  -e OPENAI_API_KEY=sk-... ghcr.io/jesusgarrigues/menu-familiar:latest
+  -e OPENAI_API_KEY=sk-... jesusgarrigues/menu-familiar:latest
 ```
 
 Los datos (base de datos SQLite y PDFs descargados) se guardan en la carpeta `./data`.
 
-> Si la imagen de GHCR es privada, hazla pública en GitHub (Packages → menu-familiar → Package settings → Change visibility), o inicia sesión con `docker login ghcr.io`.
+La imagen está en Docker Hub ([`jesusgarrigues/menu-familiar`](https://hub.docker.com/r/jesusgarrigues/menu-familiar)) y también en GitHub (`ghcr.io/jesusgarrigues/menu-familiar`); son la misma.
+
+Para actualizar a la última versión:
+
+```bash
+docker compose pull && docker compose up -d
+```
 
 ## Configuración (variables de entorno)
 
@@ -69,7 +75,7 @@ La web del cole está hecha con Google Sites y el PDF está en Google Drive. Si 
 Cada `push` a `main` ejecuta las pruebas y publica la imagen con GitHub Actions (`.github/workflows/docker.yml`):
 
 - **GitHub Container Registry:** `ghcr.io/jesusgarrigues/menu-familiar:latest`. Funciona sin configurar nada.
-- **Docker Hub (opcional):** añade en *Settings → Secrets and variables → Actions* los secretos `DOCKERHUB_USERNAME` y `DOCKERHUB_TOKEN` (un *access token* de Docker Hub). La imagen se publicará también como `TU_USUARIO/menu-familiar`.
+- **Docker Hub:** `jesusgarrigues/menu-familiar:latest`, usando los secretos `DOCKERHUB_USERNAME` y `DOCKERHUB_TOKEN` del repositorio.
 
 ## Desarrollo
 
