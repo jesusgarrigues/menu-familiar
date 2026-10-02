@@ -78,6 +78,30 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(day["school"]["dishes"], ["Paella"])
         self.assertTrue(any("huevo" in o["groups"] for o in day["cena"]["options"]))
 
+    def test_pwa_files(self):
+        m = self.c.get("/manifest.webmanifest")
+        self.assertEqual(m.status_code, 200)
+        self.assertIn("icon-maskable-512.png", m.get_data(as_text=True))
+        sw = self.c.get("/sw.js")
+        self.assertEqual(sw.headers.get("Service-Worker-Allowed"), "/")
+        for icon in ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):
+            self.assertEqual(self.c.get(f"/static/icons/{icon}").status_code, 200)
+
+    def test_login(self):
+        from app import config
+        config.APP_PASSWORD = "secreta"
+        try:
+            c = app.test_client()
+            self.assertEqual(c.get("/api/status").status_code, 401)
+            self.assertEqual(c.get("/").status_code, 302)
+            self.assertEqual(c.get("/manifest.webmanifest").status_code, 200)
+            c.post("/login", data={"password": "mal"})
+            self.assertEqual(c.get("/api/status").status_code, 401)
+            c.post("/login", data={"password": "secreta"})
+            self.assertEqual(c.get("/api/status").status_code, 200)
+        finally:
+            config.APP_PASSWORD = ""
+
     def test_holiday_has_home_lunch(self):
         w = self.c.get("/api/week?date=2026-10-12").json
         self.assertIsNotNone(w["days"][0]["comida"])

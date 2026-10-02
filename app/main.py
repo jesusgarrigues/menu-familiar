@@ -3,9 +3,8 @@ import calendar
 import os
 import secrets
 from datetime import date, timedelta
-from functools import wraps
 
-from flask import Flask, Response, abort, jsonify, request, send_from_directory
+from flask import Flask, abort, jsonify, redirect, request, send_from_directory, session
 
 from . import ai, config, db, planner, service
 from .recipes import RECIPES
@@ -17,14 +16,98 @@ app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024
 db.init()
 
 
+def _secret_key() -> bytes:
+    path = config.DATA_DIR / "secret.key"
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        key = secrets.token_bytes(32)
+        path.write_bytes(key)
+        return key
+
+
+app.secret_key = _secret_key()
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=timedelta(days=365),
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_HTTPONLY=True,
+)
+
+# Rutas que no necesitan contraseña (el navegador las pide sin sesión al instalar la app)
+PUBLIC = ("/healthz", "/login", "/manifest.webmanifest", "/sw.js", "/static/icons/", "/static/login.css")
+
+
 @app.before_request
 def auth():
-    if not config.APP_PASSWORD or request.path == "/healthz":
+    if not config.APP_PASSWORD or request.path.startswith(PUBLIC):
         return None
-    a = request.authorization
+    if session.get("ok") == _pw_tag():
+        return None
+    a = request.authorization  # compatibilidad con acceso por usuario/contraseña básico
     if a and secrets.compare_digest(a.password or "", config.APP_PASSWORD):
         return None
-    return Response("Acceso restringido", 401, {"WWW-Authenticate": 'Basic realm="Menu familiar"'})
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Inicia sesión"}), 401
+    return redirect("/login")
+
+
+def _pw_tag() -> str:
+    import hashlib
+    return hashlib.sha256(config.APP_PASSWORD.encode()).hexdigest()[:16]
+
+
+LOGIN_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Menú familiar</title><link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#FFFFFF">
+<style>
+:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#fff;color:#000}
+@media (prefers-color-scheme:dark){body{background:#0B0B0B;color:#fff}input{background:#1C1C1C!important;color:#fff}}
+form{width:min(360px,calc(100vw - 32px));text-align:center}img{width:84px;height:84px;border-radius:20px}
+h1{font-size:1.7rem;margin:14px 0 4px;letter-spacing:-.02em}p{color:#6B6B6B;margin:0 0 22px}
+input{width:100%;box-sizing:border-box;border:0;background:#F3F3F3;border-radius:12px;padding:14px;font:inherit;margin-bottom:12px}
+button{width:100%;border:0;border-radius:999px;background:#06C167;color:#fff;font:700 1rem inherit;padding:14px;cursor:pointer}
+.e{color:#E8590C;font-weight:700;margin:-8px 0 12px}
+</style></head><body><form method="post"><img src="/static/icons/icon-192.png" alt="">
+<h1>Menú familiar</h1><p>Introduce la contraseña de la familia</p>{error}
+<input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" autofocus required>
+<button>Entrar</button></form></body></html>"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not config.APP_PASSWORD:
+        return redirect("/")
+    error = ""
+    if request.method == "POST":
+        if secrets.compare_digest(request.form.get("password", ""), config.APP_PASSWORD):
+            session.permanent = True
+            session["ok"] = _pw_tag()
+            return redirect("/")
+        error = '<p class="e">Contraseña incorrecta</p>'
+    return LOGIN_HTML.replace("{error}", error)
+
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    r = send_from_directory(STATIC, "manifest.webmanifest", mimetype="application/manifest+json")
+    r.headers["Cache-Control"] = "no-cache"
+    return r
+
+
+@app.get("/sw.js")
+def service_worker():
+    r = send_from_directory(STATIC, "sw.js", mimetype="application/javascript")
+    r.headers["Cache-Control"] = "no-cache"
+    r.headers["Service-Worker-Allowed"] = "/"
+    return r
 
 
 def parse_day(s: str | None) -> date:
@@ -40,7 +123,9 @@ def err(msg, code=400):
 
 @app.get("/")
 def index():
-    return send_from_directory(STATIC, "index.html")
+    r = send_from_directory(STATIC, "index.html")
+    r.headers["Cache-Control"] = "no-cache"
+    return r
 
 
 @app.get("/healthz")
@@ -63,6 +148,7 @@ def status():
         "last_check_result": db.get_setting("last_check_result"),
         "logs": logs,
         "servings": config.SERVINGS,
+        "auth": bool(config.APP_PASSWORD),
     }
 
 
