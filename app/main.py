@@ -152,7 +152,8 @@ def status():
         "servings": config.SERVINGS,
         "auth": bool(config.APP_PASSWORD),
         "usage": ai.usage(),
-        "photos": {"enabled": config.AI_PHOTOS and bool(config.OPENAI_API_KEY), **photos.stats()},
+        "photos": {"enabled": photos.enabled(), "web": config.PHOTOS_WEB, "pexels": bool(config.PEXELS_API_KEY),
+                   "ai": ai.photos_available(), **photos.stats()},
     }
 
 
@@ -166,6 +167,11 @@ def photo():
     if status == "pending":
         return jsonify({"status": "pending"}), 202
     return jsonify({"status": "none"}), 404
+
+
+@app.get("/api/photo-credits")
+def photo_credits():
+    return {"credits": photos.credits()}
 
 
 @app.get("/api/allergens")

@@ -110,7 +110,7 @@ def save_to_library(dish: dict, when: str = "cena"):
         row = c.execute("SELECT data FROM library WHERE key=?", (key,)).fetchone()
         cur = db.loads(row["data"], {}) if row else {}
         data = {"name": name, "groups": dish.get("groups") or cur.get("groups") or sorted(classify(name)),
-                "when": cur.get("when") or when, "source": "ia",
+                "when": cur.get("when") or when, "source": "ia", "kid": 3,
                 "ingredients": dish.get("ingredients") or cur.get("ingredients") or []}
         c.execute("INSERT INTO library(key, data) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
                   (key, db.dumps(data)))
@@ -163,9 +163,11 @@ def rule_dinners(lunch: list[str], hint: str, day: date, n=4, avoid=None, salt="
                 s += 1.5
             if "pescado" in lunch_groups and g & {"huevo", "carne"}:
                 s += 1.5
+        kid = r.get("kid", 2)
+        s += (kid - 2) * 1.6  # prioriza lo que gusta a los niños
         if r["name"].lower() in recent:
             s -= 4
-        elif hint_groups and _strong(r, hint_groups):
+        elif hint_groups and _strong(r, hint_groups) and kid >= 2:
             strong += 1
         scored.append((s, r))
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -327,7 +329,7 @@ def _pick_weekend(monday: date, slots: list[str], salt="") -> list[dict]:
         for r in all_recipes():
             if r["when"] not in (slot, "ambas") or r["name"].lower() in used:
                 continue
-            s = sum(max(deficit.get(g, 0), -1) for g in r["groups"]) + rng.random() * 1.5
+            s = sum(max(deficit.get(g, 0), -1) for g in r["groups"]) + rng.random() * 1.5 + (r.get("kid", 2) - 2) * 1.5
             if slot == "cena" and "verdura" in r["groups"]:
                 s += 1
             if s > best_s:

@@ -114,7 +114,63 @@ _RAW = [
      f"{D}:Lentejas=300 g; {D}:Arroz=150 g; {F}:Cebolla=1; {F}:Zanahoria=2; {F}:Pimiento verde=1"),
     ("Salmón al horno con patatas y brócoli", "pescado patata verdura", "comida",
      f"{P}:Salmón en lomos=4; {F}:Patata=600 g; {F}:Brócoli=1"),
+
+    # ---------- Favoritos de los niños (verdura integrada en el plato) ----------
+    ("Croquetas caseras de pollo con crema de calabaza", "carne verdura lacteo", "cena",
+     f"{C}:Pechuga de pollo=300 g; {H}:Leche=750 ml; {D}:Harina=; {H}:Huevos=2; {D}:Pan rallado=; {F}:Calabaza=600 g; {F}:Zanahoria=2"),
+    ("Nuggets caseros de pollo con puré de patata y zanahoria", "carne patata verdura", "cena",
+     f"{C}:Pechuga de pollo=600 g; {H}:Huevos=2; {D}:Copos de maíz o pan rallado=; {F}:Patata=600 g; {F}:Zanahoria=3; {H}:Leche=200 ml"),
+    ("Merluza rebozada con patatas al horno", "pescado patata", "cena",
+     f"{P}:Merluza en filetes sin espinas=600 g; {H}:Huevos=2; {D}:Harina=; {F}:Patata=800 g; {F}:Limón=1"),
+    ("Palitos de pescado caseros con puré de calabacín", "pescado verdura", "cena",
+     f"{P}:Merluza o abadejo sin espinas=600 g; {H}:Huevos=2; {D}:Pan rallado=; {F}:Calabacín=3; {F}:Patata=1; {H}:Quesitos=4"),
+    ("Hamburguesitas de pollo y calabacín con patatas", "carne verdura patata", "cena",
+     f"{C}:Carne picada de pollo=500 g; {F}:Calabacín=1; {H}:Huevos=1; {D}:Pan rallado=; {F}:Patata=600 g"),
+    ("Tortilla de patata y calabacín", "huevo patata verdura", "cena",
+     f"{H}:Huevos=8; {F}:Patata=600 g; {F}:Calabacín=1; {F}:Cebolla=1"),
+    ("Mini pizzas caseras de jamón, queso y verduras", "carne lacteo verdura", "cena",
+     f"{PA}:Masa de pizza o pan de pita=4; {D}:Tomate triturado=200 g; {C}:Jamón cocido=150 g; {H}:Mozzarella=200 g; {F}:Champiñones=150 g; {F}:Pimiento rojo=1"),
+    ("Quesadillas de pollo con pimiento y maíz", "carne verdura lacteo", "cena",
+     f"{PA}:Tortillas de trigo=8; {C}:Pechuga de pollo=400 g; {F}:Pimiento rojo=1; {D}:Maíz dulce=1 lata; {H}:Queso rallado=200 g"),
+    ("Empanadillas de atún y tomate con ensalada", "pescado verdura", "cena",
+     f"{PA}:Obleas de empanadilla=16; {D}:Atún en lata=3 latas; {D}:Tomate frito=200 g; {H}:Huevos=2; {F}:Lechuga=1"),
+    ("Sándwich caliente de pavo y queso con crema de verduras", "carne lacteo verdura", "cena",
+     f"{PA}:Pan de molde=1 paquete; {C}:Pavo en lonchas=200 g; {H}:Queso en lonchas=200 g; {F}:Calabacín=2; {F}:Zanahoria=2; {F}:Puerro=1"),
+    ("Crema suave de calabaza con huevo duro y picatostes", "verdura huevo", "cena",
+     f"{F}:Calabaza=800 g; {F}:Zanahoria=2; {F}:Patata=1; {H}:Huevos=4; {PA}:Pan=1 barra"),
+    ("Albóndigas de merluza en salsa de tomate con arroz", "pescado arroz verdura", "cena",
+     f"{P}:Merluza sin espinas=500 g; {H}:Huevos=1; {D}:Pan rallado=; {D}:Tomate triturado=400 g; {D}:Arroz=200 g"),
+    ("Espaguetis con atún y tomate", "pasta pescado verdura", "comida",
+     f"{D}:Espaguetis=400 g; {D}:Atún en lata=3 latas; {D}:Tomate triturado=600 g; {F}:Cebolla=1"),
+    ("Arroz a la cubana con huevo", "arroz huevo verdura", "comida",
+     f"{D}:Arroz=350 g; {H}:Huevos=4; {D}:Tomate frito=400 g"),
+    ("Macarrones con boloñesa de verduras", "pasta carne verdura", "comida",
+     f"{D}:Macarrones=400 g; {C}:Carne picada mixta=400 g; {F}:Zanahoria=2; {F}:Calabacín=1; {D}:Tomate triturado=800 g; {H}:Queso rallado=100 g"),
+    ("Lentejas con chorizo y verduras trituradas", "legumbre carne verdura", "comida",
+     f"{D}:Lentejas=400 g; {C}:Chorizo=1; {F}:Zanahoria=2; {F}:Pimiento verde=1; {F}:Cebolla=1; {F}:Patata=2"),
+    ("Pollo al horno con patatas y salsa de manzana", "carne patata fruta", "comida",
+     f"{C}:Muslos de pollo=8; {F}:Patata=1 kg; {F}:Manzana=2; {F}:Cebolla=1"),
 ]
+
+# Qué tal suelen gustar a los niños (1 = plato de adulto, 2 = normal, 3 = favorito). Por defecto 2.
+KID_LOW = {
+    "Ensalada completa con queso fresco y nueces", "Verduras al horno con yogur y hummus", "Coliflor gratinada con bechamel",
+    "Sardinas al horno con ensalada de tomate", "Dorada a la sal con verduras asadas", "Brochetas de rape y langostinos con pisto",
+    "Fideuá de marisco", "Merluza en salsa verde con patatas", "Gallo a la plancha con puré de verduras",
+    "Crema de calabacín y bacalao en papillote", "Sopa de pescado con fideos", "Huevos al plato con pisto",
+}
+KID_HIGH = {
+    "Tortilla de patata con pimientos asados", "Pizza casera de verduras y huevo", "Wraps de pollo y verduras",
+    "Hamburguesas de atún con verduras al horno", "Pescadilla rebozada con ensalada", "Albóndigas de pollo en salsa de tomate con verduras",
+    "Macarrones con tomate y carne picada", "Lasaña de verduras y carne", "Pollo asado con patatas panadera",
+    "Hamburguesas caseras con ensalada", "Ensaladilla rusa y filetes de pollo empanados", "Crema de calabacín con quesitos y picatostes",
+    "Croquetas caseras de pollo con crema de calabaza", "Nuggets caseros de pollo con puré de patata y zanahoria",
+    "Merluza rebozada con patatas al horno", "Palitos de pescado caseros con puré de calabacín",
+    "Hamburguesitas de pollo y calabacín con patatas", "Tortilla de patata y calabacín", "Mini pizzas caseras de jamón, queso y verduras",
+    "Quesadillas de pollo con pimiento y maíz", "Empanadillas de atún y tomate con ensalada",
+    "Sándwich caliente de pavo y queso con crema de verduras", "Espaguetis con atún y tomate", "Arroz a la cubana con huevo",
+    "Macarrones con boloñesa de verduras", "Albóndigas de merluza en salsa de tomate con arroz", "Sopa de pollo con verduras y estrellitas",
+}
 
 
 def _parse_ings(s: str):
@@ -130,7 +186,8 @@ def _parse_ings(s: str):
 
 
 RECIPES = [
-    {"name": n, "groups": g.split(), "when": w, "ingredients": _parse_ings(i)}
+    {"name": n, "groups": g.split(), "when": w, "ingredients": _parse_ings(i),
+     "kid": 1 if n in KID_LOW else 3 if n in KID_HIGH else 2}
     for n, g, w, i in _RAW
 ]
 BY_NAME = {r["name"].lower(): r for r in RECIPES}

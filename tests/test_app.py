@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 TMP = tempfile.mkdtemp()
-os.environ.update(DATA_DIR=TMP, DISABLE_SCHEDULER="1", OPENAI_API_KEY="", ANTHROPIC_API_KEY="")
+os.environ.update(DATA_DIR=TMP, DISABLE_SCHEDULER="1", OPENAI_API_KEY="", ANTHROPIC_API_KEY="", PHOTOS_WEB="false")
 
 from make_sample_pdf import build  # noqa: E402
 
@@ -57,6 +57,35 @@ class PlannerTest(unittest.TestCase):
         from app.photos import key_for
         self.assertEqual(key_for("Cocido completo"), key_for("COCIDO MADRILEÑO (1,3)"))
         self.assertEqual(key_for("Pasta integral boloñesa"), key_for("Macarrones a la boloñesa"))
+
+    def test_photo_relevance(self):
+        from app.photo_sources import relevance
+        self.assertGreaterEqual(relevance("Lentejas estofadas", "File:Lentejas estofadas con chorizo.jpg"), 0.5)
+        self.assertLess(relevance("Lentejas estofadas", "File:Mapa de Madrid.png"), 0.5)
+
+    def test_web_photo_before_ai(self):
+        import io as _io
+        from unittest import mock
+        from PIL import Image
+        from app import config, photo_sources, photos
+        buf = _io.BytesIO(); Image.new("RGB", (800, 600), (180, 90, 40)).save(buf, "JPEG")
+
+        class R:
+            ok = True
+            headers = {"content-type": "image/jpeg"}
+            content = buf.getvalue()
+
+        cand = [{"url": "https://x/y.jpg", "title": "Croquetas caseras de pollo", "source": "wikimedia",
+                 "credit": "Autor (Wikimedia Commons)", "credit_url": "https://c", "license": "CC BY-SA 4.0"}]
+        with mock.patch.object(config, "PHOTOS_WEB", True), \
+             mock.patch.object(photo_sources, "PROVIDERS", [lambda q: cand]), \
+             mock.patch("app.photo_sources.requests.get", return_value=R()), \
+             mock.patch("app.ai.generate_photo") as gen:
+            photos._worker_once(photos.key_for("Croquetas caseras de pollo"), "Croquetas caseras de pollo")
+            gen.assert_not_called()
+        path, status = photos.lookup("Croquetas caseras de pollo")
+        self.assertEqual(status, "ok")
+        self.assertEqual(photos.credits()[0]["license"], "CC BY-SA 4.0")
 
     def test_sum_qty(self):
         self.assertEqual(planner.sum_qty(["500 g", "1 kg", "2 latas", "1 lata"]), "1,5 kg + 3 latas")

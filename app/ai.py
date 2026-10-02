@@ -140,8 +140,13 @@ def complete_json(system: str, prompt: str, pdf_bytes: bytes | None = None, max_
 
 # Instrucciones fijas (siempre idénticas, delante: así se aprovecha la caché del proveedor)
 SYSTEM = (
-    "Eres un asistente de nutrición infantil y cocina casera española para una familia con niños en edad escolar. "
-    "Propones platos sencillos (menos de 30 minutos), de temporada y que gusten a los niños. "
+    "Eres un asistente de nutrición infantil y cocina casera española para una familia con niños de primaria. "
+    "Propones platos sencillos (menos de 30 minutos) pensados para que los niños se los coman con gusto: "
+    "formatos que les encantan (tortillas, rebozados y empanados caseros, croquetas, hamburguesitas, albóndigas, "
+    "pasta, arroz, cremas suaves, pizzas y wraps caseros, quesadillas, sándwiches calientes), con la verdura "
+    "integrada o camuflada en el plato (triturada, en crema, rallada o dentro de la masa). "
+    "Evita platos de adulto: verdura sola como plato principal, ensaladas complejas, pescados con espinas, "
+    "marisco, sabores fuertes, picante, frutos secos enteros y preparaciones laboriosas. "
     "Respondes SIEMPRE solo con JSON válido, sin texto adicional, y con nombres de plato cortos en español "
     "(primera letra en mayúscula, el resto en minúscula). "
     "Grupos de alimentos válidos: " + ", ".join(GROUPS) + ". "
@@ -178,8 +183,9 @@ def suggest_week(items: list[dict], n: int = 3, avoid: list[str] | None = None) 
     lines = "\n".join(f"- {it['date']}: comida del cole: {', '.join(it['lunch']) or 'desconocida'}; "
                       f"recomendación de cena: {it['hint'] or 'ninguna'}" for it in items)
     prompt = f"""Tarea: proponer cenas.
-Para cada día, propón {n} cenas distintas que cumplan la recomendación del cole (si solo indica ingredientes o grupos,
-conviértelos en platos concretos) y complementen la comida sin repetirla. No repitas platos entre días.
+Para cada día, propón {n} cenas distintas para niños que cumplan la recomendación del cole (si solo indica ingredientes
+o grupos, conviértelos en platos concretos que gusten a los niños) y complementen la comida sin repetirla.
+No repitas platos entre días.
 Formato: {{"days": {{"YYYY-MM-DD": [{{"name": "...", "groups": ["..."]}}]}}}}
 Evita: {', '.join(avoid or []) or 'nada'}
 Días:
@@ -213,7 +219,7 @@ def generate_photo(name: str) -> bytes:
     """Foto del plato en calidad baja (la más barata). Devuelve los bytes de la imagen."""
     if not photos_available():
         raise AIError("Fotos con IA no disponibles (sin clave de OpenAI o límite alcanzado)")
-    prompt = (f"Fotografía gastronómica realista de un plato casero español: {name}. "
+    prompt = (f"Fotografía gastronómica realista de un plato casero español para niños: {name}. "
               "Ración familiar servida en un plato blanco sencillo sobre una mesa de madera clara, luz natural, "
               "vista ligeramente cenital, apetecible, estilo foto de app de comida a domicilio. "
               "Sin texto, sin logotipos, sin personas, sin manos.")

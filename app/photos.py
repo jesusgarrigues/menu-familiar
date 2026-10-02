@@ -1,9 +1,10 @@
-"""Fotos de los platos: se generan UNA vez por plato (calidad baja) y se guardan para siempre.
+"""Fotos de los platos: se consiguen UNA vez por plato y se guardan para siempre.
 
+- Primero se buscan en internet (Pexels, Wikimedia Commons, Openverse): gratis.
+- Solo si no aparece ninguna adecuada se crea con IA (calidad baja, unos 0,005 $).
 - Los nombres parecidos comparten foto ("Cocido completo" / "Cocido madrileño", "Pasta integral boloñesa" /
   "Pasta a la boloñesa").
-- Se generan en segundo plano y de una en una, solo cuando el plato aparece en pantalla.
-- Sin clave de OpenAI, o con el límite de gasto alcanzado, la app muestra un marcador en su lugar.
+- Se consiguen en segundo plano y de una en una, solo cuando el plato aparece en pantalla.
 """
 import hashlib
 import io
@@ -11,7 +12,7 @@ import queue
 import re
 import threading
 
-from . import ai, config, db
+from . import ai, config, db, photo_sources
 from .text import ALLERGEN_RE, norm
 
 STOP = {"de", "del", "con", "y", "e", "a", "al", "la", "las", "el", "los", "en", "su", "o", "para", "por", "sin",
@@ -81,9 +82,9 @@ def lookup(name: str):
     if row and row["status"] == "pending":
         _ensure_worker()
         return None, "pending"
-    if row and row["status"] == "error":
+    if row and row["status"] in ("error", "missing"):
         return None, "none"
-    if not ai.photos_available():
+    if not enabled():
         return None, "none"
     with db.tx() as c:
         c.execute("INSERT OR REPLACE INTO photos(key, name, file, status) VALUES(?,?,?,'pending')",
@@ -113,16 +114,34 @@ def _worker():
         if key in done:
             continue
         done.add(key)
-        try:
-            data = ai.generate_photo(name)
-            data = _shrink(data)
-            (config.PHOTO_DIR / _file_for(key)).write_bytes(data)
+        _worker_once(key, name)
+
+
+def _worker_once(key: str, name: str):
+    """Consigue la foto de un plato: internet primero (gratis) y, si no hay, IA."""
+    with db.tx() as c:
+        c.execute("INSERT OR IGNORE INTO photos(key, name, file, status) VALUES(?,?,?,'pending')",
+                  (key, name, _file_for(key)))
+    status, credit = "missing", {}
+    try:
+        found = photo_sources.find_photo(name) if config.PHOTOS_WEB else None
+        if found:
+            data, credit = found
+        elif ai.photos_available():
+            data, credit = ai.generate_photo(name), {"source": "ia", "credit": "Imagen creada con IA",
+                                                     "credit_url": "", "license": ""}
+        else:
+            data = None
+        if data:
+            (config.PHOTO_DIR / _file_for(key)).write_bytes(_shrink(data))
             status = "ok"
-        except Exception as e:
-            db.log("warn", f"No se pudo crear la foto de «{name}»: {e}")
-            status = "error"
-        with db.tx() as c:
-            c.execute("UPDATE photos SET status=? WHERE key=?", (status, key))
+    except Exception as e:
+        db.log("warn", f"No se pudo conseguir la foto de «{name}»: {e}")
+        status = "error"
+    with db.tx() as c:
+        c.execute("UPDATE photos SET status=?, source=?, credit=?, credit_url=?, license=? WHERE key=?",
+                  (status, credit.get("source"), credit.get("credit"), credit.get("credit_url"),
+                   credit.get("license"), key))
 
 
 def _shrink(data: bytes, size: int = 640) -> bytes:
@@ -138,7 +157,21 @@ def _shrink(data: bytes, size: int = 640) -> bytes:
         return data
 
 
+def enabled() -> bool:
+    return config.PHOTOS_WEB or ai.photos_available()
+
+
 def stats() -> dict:
     with db.tx() as c:
         rows = c.execute("SELECT status, COUNT(*) n FROM photos GROUP BY status").fetchall()
-    return {r["status"]: r["n"] for r in rows}
+        src = c.execute("SELECT source, COUNT(*) n FROM photos WHERE status='ok' GROUP BY source").fetchall()
+    out = {r["status"]: r["n"] for r in rows}
+    out["by_source"] = {(r["source"] or "ia"): r["n"] for r in src}
+    return out
+
+
+def credits() -> list[dict]:
+    with db.tx() as c:
+        rows = c.execute("SELECT name, source, credit, credit_url, license FROM photos "
+                         "WHERE status='ok' AND source IS NOT NULL AND source!='ia' ORDER BY name").fetchall()
+    return [dict(r) for r in rows]

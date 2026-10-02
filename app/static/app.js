@@ -135,11 +135,47 @@ function schoolCard(day, { compact = false } = {}) {
       <div class="c-body"><span class="c-dish">${esc(c.dish)}</span>
       ${s.allergens?.[i]?.length ? `<span class="c-all">Alérgenos: ${esc(allergenText(s.allergens[i]))}</span>` : ""}</div>
     </div>`).join("");
+  const list = courses(s.dishes);
+  const slides = compact ? "" : `<div class="sc-carousel" data-carousel>
+      <div class="sc-slides">${list.map(c => `<div class="sc-slide">${photo(c.dish, "ph-school")}
+        <span class="sc-cap"><b>${c.label}</b> ${esc(c.dish)}</span></div>`).join("")}</div>
+      ${list.length > 1 ? `<div class="sc-dots">${list.map((c, i) => `<button class="sc-dot ${i ? "" : "on"}" data-i="${i}" aria-label="Ver ${esc(c.dish)}"></button>`).join("")}</div>` : ""}
+    </div>`;
   return `<div class="school-card ${compact ? "compact" : ""}">
-    ${compact ? "" : photo(s.dishes[0], "ph-school")}
+    ${slides}
     <div class="sc-body">${compact ? `<div class="sc-row">${photo(s.dishes[0], "ph-sq")}<div class="sc-list">${rows}</div></div>` : rows}
     ${s.note ? `<span class="pill-note">${esc(s.note)}</span>` : ""}</div></div>`;
 }
+/* Carrusel automático: avanza cada 4 s y se pausa si el usuario lo toca */
+let carouselTimers = [];
+function startCarousels(root) {
+  carouselTimers.forEach(clearInterval);
+  carouselTimers = [];
+  $$("[data-carousel]", root).forEach(car => {
+    const track = $(".sc-slides", car);
+    const dots = $$(".sc-dot", car);
+    const n = dots.length;
+    if (n < 2) return;
+    let i = 0, pausedUntil = 0;
+    const show = (k, smooth = true) => {
+      i = (k + n) % n;
+      track.scrollTo({ left: i * track.clientWidth, behavior: smooth ? "smooth" : "auto" });
+      dots.forEach((d, j) => d.classList.toggle("on", j === i));
+    };
+    dots.forEach(d => d.onclick = () => { pausedUntil = Date.now() + 8000; show(Number(d.dataset.i)); });
+    track.addEventListener("pointerdown", () => { pausedUntil = Date.now() + 8000; });
+    track.addEventListener("scroll", () => {
+      const k = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+      if (k !== i) { i = k; dots.forEach((d, j) => d.classList.toggle("on", j === i)); }
+    }, { passive: true });
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!reduce) carouselTimers.push(setInterval(() => {
+      if (!track.isConnected || Date.now() < pausedUntil || document.hidden) return;
+      show(i + 1);
+    }, 4000));
+  });
+}
+
 function hintTip(day) {
   const h = day.school?.dinner_hint;
   return h ? `<div class="tip">${ICON.bulb}<span>El cole recomienda para cenar: <b>${esc(h.toLowerCase())}</b></span></div>` : "";
@@ -310,6 +346,7 @@ async function renderHome() {
   $$("[data-day]").forEach(b => b.onclick = () => { state.date = b.dataset.day; renderHome(); });
   $$("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   bindActions(view);
+  startCarousels(view);
   $("#regen-weekend")?.addEventListener("click", e => busy(e.currentTarget, async () => {
     await api(`/api/week/${mon}/weekend`, { method: "POST" }); await renderHome(); toast("Nuevo menú de fin de semana");
   }));
@@ -384,14 +421,48 @@ async function renderMonth() {
       ${data.menu ? `<a class="pill grow" href="/api/menus/${y}/${m}/pdf" target="_blank" rel="noopener">${ICON.doc}Ver PDF del cole</a>` : `<span class="pill grow">Sin PDF</span>`}
       <button class="icon-btn" id="mnext" aria-label="Mes siguiente">›</button>
     </div>
+    <div class="mlist">${monthList(data.days)}</div>
     <div class="cal">${["L","M","X","J","V","S","D"].map((x, i) => `<div class="dow"><b>${["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"][i]}</b><span>${x}</span></div>`).join("")}${blanks}${cells}</div>
     <div class="legend pad">
       <span><i class="lg cole"></i>Comida</span><span><i class="lg cena"></i>Cena</span>
     </div>
-    <p class="help pad">Toca un día para ver el detalle y cambiarlo sin salir del mes.</p>`;
+    <p class="help pad mhelp">Toca un día para ver el detalle y cambiarlo sin salir del mes.</p>`;
   $("#mprev").onclick = () => { state.month = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 }; renderMonth(); };
   $("#mnext").onclick = () => { state.month = m === 12 ? { y: y + 1, m: 1 } : { y, m: m + 1 }; renderMonth(); };
-  $$(".cell[data-date]").forEach(b => b.onclick = () => openDay(b.dataset.date));
+  $$(".cell[data-date], .mrow[data-date]").forEach(b => b.onclick = () => openDay(b.dataset.date));
+}
+
+function monthList(days) {
+  const weeks = [];
+  days.forEach(x => {
+    const mon = mondayOf(x.date);
+    let w = weeks.find(k => k.mon === mon);
+    if (!w) { w = { mon, days: [] }; weeks.push(w); }
+    w.days.push(x);
+  });
+  return weeks.map(w => {
+    const last = w.days[w.days.length - 1].date;
+    const rows = w.days.map(x => {
+      const k = wd(x.date), weekend = k >= 5;
+      const hol = !weekend && /festivo|no lectivo|vacaciones/i.test(x.note);
+      const blocks = [];
+      if (x.dishes.length) {
+        blocks.push(`<div class="mb"><span class="ml cole">En el cole</span>${courses(x.dishes).map(c =>
+          `<span class="${c.dessert ? "md" : c.label === "1.º" ? "mm" : "ms"}">${esc(c.dish)}</span>`).join("")}</div>`);
+      } else if (x.plan.comida) {
+        blocks.push(`<div class="mb"><span class="ml">Comida en casa</span><span class="mm">${esc(x.plan.comida)}</span></div>`);
+      }
+      if (x.plan.cena) blocks.push(`<div class="mb"><span class="ml">Cena en casa</span><span class="mm">${esc(x.plan.cena)}</span></div>`);
+      if (!blocks.length) blocks.push(`<span class="md">Sin datos todavía</span>`);
+      return `<button class="mrow ${weekend ? "we" : ""} ${x.date === today() ? "today" : ""}" data-date="${x.date}">
+        <span class="mdate"><small>${DOW3[k]}</small><b>${parse(x.date).getDate()}</b></span>
+        <span class="mbody">${hol ? `<span class="pill-note">${esc(x.note || "Festivo")}</span>` : ""}${blocks.join("")}</span>
+        <span class="mchev" aria-hidden="true">›</span>
+      </button>`;
+    }).join("");
+    return `<section class="mweek"><h2 class="mweek-h">Semana del ${parse(w.days[0].date).getDate()} al ${fmt(last)}</h2>
+      <div class="mweek-box">${rows}</div></section>`;
+  }).join("");
 }
 
 async function openDay(date) {
@@ -519,11 +590,13 @@ async function renderSettings() {
     <h2 class="sec-h pad">Inteligencia artificial</h2>
     <div class="group">
       <div class="item"><div class="txt"><b>${s.ai ? `Activada (${esc(s.ai)})` : "Sin IA"}</b>
-        <span>${s.ai ? "Lee el PDF, propone cenas cuando el recetario no tiene suficientes y crea las fotos de los platos." : "Añade OPENAI_API_KEY para leer mejor el PDF y tener fotos de los platos."}</span></div></div>
+        <span>${s.ai ? "Lee el PDF, propone cenas cuando el recetario no tiene suficientes y crea las fotos que no aparecen en internet." : "Añade OPENAI_API_KEY para leer mejor el PDF y crear las fotos que no aparezcan en internet."}</span></div></div>
       ${s.ai ? `<div class="item"><div class="txt"><b>Gasto de este mes: ${u.cost.toFixed(2)} $ de ${u.budget.toFixed(2)} $</b>
         <div class="progress" style="margin:8px 0 6px"><i style="width:${pct}%"></i></div>
         <span>${u.calls} consultas · ${u.images} fotos nuevas. Al llegar al límite la app sigue funcionando con el recetario.</span></div></div>
-      <div class="item"><div class="txt"><b>Fotos de platos</b><span>${s.photos.enabled ? `${s.photos.ok || 0} guardadas${s.photos.pending ? ` · ${s.photos.pending} creándose` : ""}. Cada plato se crea una sola vez.` : "Necesitan una clave de OpenAI."}</span></div></div>` : ""}
+` : ""}
+      <div class="item"><div class="txt"><b>Fotos de platos</b><span>${photoSummary(s.photos)}</span>
+        ${(s.photos.ok || 0) ? `<div style="margin-top:8px"><button class="btn sm" id="credits" style="background:var(--bg)">Ver créditos de las fotos</button></div>` : ""}</div></div>
     </div>
 
     <h2 class="sec-h pad">Menú del cole</h2>
@@ -552,6 +625,12 @@ async function renderSettings() {
     ${s.auth ? `<div class="pad"><a class="btn block" href="/logout">Cerrar sesión</a></div>` : ""}`;
 
   Install.renderCard($("#install-card"));
+  $("#credits")?.addEventListener("click", async () => {
+    const r = await api("/api/photo-credits");
+    sheet("Créditos de las fotos", r.credits.length
+      ? `<ul class="ings" style="margin:8px 0 0">${r.credits.map(c => `<li><span>${esc(c.name)}</span><b>${c.credit_url ? `<a href="${esc(c.credit_url)}" target="_blank" rel="noopener">${esc(c.credit)}</a>` : esc(c.credit)}${c.license ? ` · ${esc(c.license)}` : ""}</b></li>`).join("")}</ul>`
+      : `<p class="help">Todas las fotos guardadas se han creado con IA.</p>`, { ok: "", cancel: "Cerrar" });
+  });
   const fetchMenu = force => async e => busy(e.currentTarget, async () => {
     const r = await api(`/api/fetch${force ? "?force=1" : ""}`, { method: "POST" });
     toast(r.results.join(" · ")); state.week = null; renderSettings();
@@ -567,6 +646,18 @@ async function renderSettings() {
       toast(`Importado ${MONTHS[r.month - 1]} ${r.year}: ${r.days} días`); state.week = null; renderSettings();
     });
   };
+}
+
+function photoSummary(p) {
+  if (!p.enabled) return "Desactivadas.";
+  const by = p.by_source || {};
+  const web = (by.pexels || 0) + (by.wikimedia || 0) + (by.openverse || 0);
+  const parts = [`${p.ok || 0} guardadas (${web} de internet, ${by.ia || 0} creadas con IA)`];
+  if (p.pending) parts.push(`${p.pending} buscándose`);
+  let txt = parts.join(" · ") + ". Primero se buscan en internet; la IA solo crea las que no aparecen.";
+  if (!p.pexels) txt += " Para fotos de más calidad, añade una clave gratuita de Pexels (PEXELS_API_KEY).";
+  if (!p.ai) txt += " Sin clave de OpenAI (o con el límite alcanzado) no se crean fotos con IA.";
+  return txt;
 }
 
 /* =========================================================

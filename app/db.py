@@ -116,6 +116,12 @@ def init():
     config.PHOTO_DIR.mkdir(parents=True, exist_ok=True)
     with tx() as c:
         c.executescript(SCHEMA)
+        # Migraciones sencillas para bases de datos de versiones anteriores
+        for col in ("source TEXT", "credit TEXT", "credit_url TEXT", "license TEXT"):
+            try:
+                c.execute(f"ALTER TABLE photos ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass
 
 
 def log(level: str, message: str):
