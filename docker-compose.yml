@@ -1,0 +1,16 @@
+services:
+  menu-familiar:
+    image: ghcr.io/jesusgarrigues/menu-familiar:latest
+    # Para construir desde el código en lugar de usar la imagen publicada:
+    # build: .
+    container_name: menu-familiar
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: Europe/Madrid
+    volumes:
+      - ./data:/data
